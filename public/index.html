@@ -3,85 +3,105 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Trading Transparency Dashboard (MVP)</title>
+    <title>Trading Transparency Dashboard</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <h1>Trading Transparency Dashboard</h1>
-      <p>Simple MVP you can run locally and test visually.</p>
-    </header>
+    <div class="app">
+      <aside class="sidebar">
+        <h1>Trading OS</h1>
+        <p class="muted">Your habits dashboard</p>
 
-    <main class="layout">
-      <aside class="panel controls">
-        <h2>Data & Filters</h2>
-        <label class="field">
-          Upload trade CSV
-          <input id="csvInput" type="file" accept=".csv" />
-        </label>
-        <button id="loadSampleBtn">Load sample trades</button>
+        <nav id="navTabs" class="nav-tabs">
+          <button data-tab="overview" class="active">Overview</button>
+          <button data-tab="journal">Journal</button>
+          <button data-tab="mistakes">Mistakes</button>
+          <button data-tab="rules">Rules</button>
+        </nav>
 
-        <label class="field">
-          Setup
-          <select id="setupFilter">
-            <option value="ALL">All setups</option>
-          </select>
-        </label>
-
-        <label class="field">
-          Rule followed
-          <select id="ruleFilter">
-            <option value="ALL">All</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </label>
-
-        <label class="field">
-          Symbol
-          <input id="symbolFilter" type="text" placeholder="e.g. TSLA" />
-        </label>
-
-        <p class="hint">CSV columns: trade_id,date,symbol,direction,setup_tag,entry_price,stop_price,exit_price,size,fees,net_pl,r_multiple,rule_followed,mistake_tags,notes</p>
+        <div class="panel utilities">
+          <h3>Data Controls</h3>
+          <button id="exportBtn">Export backup (.json)</button>
+          <button id="importBtn">Import backup</button>
+          <button id="resetBtn" class="danger">Reset to demo data</button>
+          <input id="importInput" type="file" accept="application/json" hidden />
+          <p class="muted small" id="saveStatus">Saved locally in this browser.</p>
+        </div>
       </aside>
 
-      <section class="content">
-        <section class="cards" id="scorecards"></section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Equity Curve</h2>
-            <span id="tradeCount"></span>
+      <main class="main">
+        <section id="tab-overview" class="tab active">
+          <div class="panel">
+            <h2>Overview</h2>
+            <p class="muted">Focus on consistency and your recurring habits.</p>
+            <div id="scorecards" class="cards"></div>
           </div>
-          <canvas id="equityChart" width="1100" height="280"></canvas>
-        </section>
-
-        <section class="grid-2">
-          <section class="panel">
-            <h2>Top Mistakes</h2>
-            <ul id="mistakeList" class="list"></ul>
-          </section>
-          <section class="panel">
-            <h2>Weekly Summary</h2>
-            <div id="weeklySummary" class="summary"></div>
-          </section>
-        </section>
-
-        <section class="panel">
-          <h2>Trade Journal</h2>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th><th>Symbol</th><th>Setup</th><th>R</th><th>Net P/L</th><th>Rule</th><th>Mistakes</th>
-                </tr>
-              </thead>
-              <tbody id="tradeTableBody"></tbody>
-            </table>
+          <div class="panel">
+            <h3>Equity Curve</h3>
+            <canvas id="equityChart" width="980" height="260"></canvas>
+          </div>
+          <div class="grid2">
+            <div class="panel">
+              <h3>Best Habits</h3>
+              <ul id="bestHabits"></ul>
+            </div>
+            <div class="panel">
+              <h3>Worst Habits</h3>
+              <ul id="worstHabits"></ul>
+            </div>
           </div>
         </section>
-      </section>
-    </main>
+
+        <section id="tab-journal" class="tab">
+          <div class="panel">
+            <h2>Journal</h2>
+            <p class="muted">Update trades directly here. Rule columns are generated from your Rules page.</p>
+            <button id="addTradeBtn">+ Add Trade</button>
+            <div class="table-wrap">
+              <table>
+                <thead id="journalHead"></thead>
+                <tbody id="journalBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-mistakes" class="tab">
+          <div class="panel">
+            <h2>Mistakes</h2>
+            <p class="muted">Where leaks are costing you the most.</p>
+            <div class="grid2">
+              <div>
+                <h3>Top Mistakes</h3>
+                <ul id="mistakeList"></ul>
+              </div>
+              <div>
+                <h3>Worst Setups by Avg R</h3>
+                <ul id="worstSetupList"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-rules" class="tab">
+          <div class="panel">
+            <h2>Rules</h2>
+            <p class="muted">Add custom rules. They immediately appear as Journal columns.</p>
+            <div class="rule-form">
+              <input id="ruleName" placeholder="Rule name (e.g. Enter only with VWAP reclaim)" />
+              <select id="ruleType">
+                <option value="checkbox">Checkbox (yes/no)</option>
+                <option value="select">Select (multiple states)</option>
+                <option value="text">Text note</option>
+              </select>
+              <input id="ruleOptions" placeholder="Options for select, comma-separated" />
+              <button id="addRuleBtn">+ Add Rule</button>
+            </div>
+            <ul id="ruleList" class="rule-list"></ul>
+          </div>
+        </section>
+      </main>
+    </div>
 
     <script src="app.js"></script>
   </body>

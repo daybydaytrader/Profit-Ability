@@ -1,7 +1,2 @@
-trade_id,date,symbol,direction,setup_tag,entry_price,stop_price,exit_price,size,fees,net_pl,r_multiple,rule_followed,mistake_tags,notes
-T1,2026-01-05,TSLA,long,ORB,240.1,237.8,245.6,80,5.2,435.6,1.8,true,,Clean opening range breakout.
-T2,2026-01-05,NVDA,short,VWAPReject,801.2,805.4,807.5,25,3.8,-161.3,-0.9,false,late-entry,Chased after candle close.
-T3,2026-01-06,AAPL,long,Pullback,187.4,186.2,190.1,120,4.3,319.7,1.5,true,,Waited for reclaim and volume confirmation.
-T4,2026-01-07,META,long,VWAPReclaim,512.5,507.8,507.0,45,5.1,-252.6,-1.1,true,,Stopped out as planned.
-T5,2026-01-07,TSLA,short,Breakdown,236.2,238.0,230.3,90,5.0,520.1,2.3,true,,Strong breakdown held to target.
-T6,2026-01-08,AMD,long,Pullback,164.1,162.9,162.4,100,4.0,-174.0,-1.0,false,moved-stop;revenge,Broke plan after prior loss.
+# Deprecated in current MVP.
+# Trades are now managed directly in the Journal tab inside the app.
