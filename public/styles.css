@@ -1,0 +1,84 @@
+:root {
+  --bg: #0b1220;
+  --panel: #121a2d;
+  --panel-2: #1a2338;
+  --text: #ecf1ff;
+  --muted: #93a4c5;
+  --good: #23c26b;
+  --bad: #f55d78;
+  --line: #2f3c5c;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.topbar {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.topbar h1 { margin: 0; font-size: 1.4rem; }
+.topbar p { margin: 6px 0 0; color: var(--muted); }
+
+.layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  padding: 16px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+}
+.controls .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+input, select, button {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 8px;
+}
+button { cursor: pointer; font-weight: 600; }
+.hint { color: var(--muted); font-size: .82rem; line-height: 1.35; }
+
+.content { display: grid; gap: 16px; }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+}
+.card .label { font-size: .78rem; color: var(--muted); }
+.card .value { font-size: 1.2rem; font-weight: 700; margin-top: 6px; }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+}
+
+.panel-head { display: flex; justify-content: space-between; align-items: center; }
+#tradeCount { color: var(--muted); font-size: .85rem; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; }
+tr:hover { background: #1a253f; }
+
+.list { margin: 0; padding-left: 18px; }
+.summary { color: var(--muted); line-height: 1.5; }
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+canvas { width: 100%; height: 280px; background: #0f1730; border-radius: 10px; }

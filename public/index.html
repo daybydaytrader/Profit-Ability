@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trading Transparency Dashboard (MVP)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Trading Transparency Dashboard</h1>
+      <p>Simple MVP you can run locally and test visually.</p>
+    </header>
+
+    <main class="layout">
+      <aside class="panel controls">
+        <h2>Data & Filters</h2>
+        <label class="field">
+          Upload trade CSV
+          <input id="csvInput" type="file" accept=".csv" />
+        </label>
+        <button id="loadSampleBtn">Load sample trades</button>
+
+        <label class="field">
+          Setup
+          <select id="setupFilter">
+            <option value="ALL">All setups</option>
+          </select>
+        </label>
+
+        <label class="field">
+          Rule followed
+          <select id="ruleFilter">
+            <option value="ALL">All</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </label>
+
+        <label class="field">
+          Symbol
+          <input id="symbolFilter" type="text" placeholder="e.g. TSLA" />
+        </label>
+
+        <p class="hint">CSV columns: trade_id,date,symbol,direction,setup_tag,entry_price,stop_price,exit_price,size,fees,net_pl,r_multiple,rule_followed,mistake_tags,notes</p>
+      </aside>
+
+      <section class="content">
+        <section class="cards" id="scorecards"></section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Equity Curve</h2>
+            <span id="tradeCount"></span>
+          </div>
+          <canvas id="equityChart" width="1100" height="280"></canvas>
+        </section>
+
+        <section class="grid-2">
+          <section class="panel">
+            <h2>Top Mistakes</h2>
+            <ul id="mistakeList" class="list"></ul>
+          </section>
+          <section class="panel">
+            <h2>Weekly Summary</h2>
+            <div id="weeklySummary" class="summary"></div>
+          </section>
+        </section>
+
+        <section class="panel">
+          <h2>Trade Journal</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th><th>Symbol</th><th>Setup</th><th>R</th><th>Net P/L</th><th>Rule</th><th>Mistakes</th>
+                </tr>
+              </thead>
+              <tbody id="tradeTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
