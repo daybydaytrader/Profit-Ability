@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trading Transparency Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <h1>Trading OS</h1>
+        <p class="muted">Your habits dashboard</p>
+        <nav id="navTabs" class="nav-tabs">
+          <button data-tab="overview" class="active">Overview</button>
+          <button data-tab="journal">Journal</button>
+          <button data-tab="mistakes">Mistakes</button>
+          <button data-tab="rules">Rules</button>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <section id="tab-overview" class="tab active">
+          <div class="panel">
+            <h2>Overview</h2>
+            <p class="muted">Focus on consistency and your recurring habits.</p>
+            <div id="scorecards" class="cards"></div>
+          </div>
+          <div class="panel">
+            <h3>Equity Curve</h3>
+            <canvas id="equityChart" width="980" height="260"></canvas>
+          </div>
+          <div class="grid2">
+            <div class="panel">
+              <h3>Best Habits</h3>
+              <ul id="bestHabits"></ul>
+            </div>
+            <div class="panel">
+              <h3>Worst Habits</h3>
+              <ul id="worstHabits"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-journal" class="tab">
+          <div class="panel">
+            <h2>Journal</h2>
+            <p class="muted">Update trades directly here. Rule columns are generated from your Rules page.</p>
+            <button id="addTradeBtn">+ Add Trade</button>
+            <div class="table-wrap">
+              <table>
+                <thead id="journalHead"></thead>
+                <tbody id="journalBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-mistakes" class="tab">
+          <div class="panel">
+            <h2>Mistakes</h2>
+            <p class="muted">Where leaks are costing you the most.</p>
+            <div class="grid2">
+              <div>
+                <h3>Top Mistakes</h3>
+                <ul id="mistakeList"></ul>
+              </div>
+              <div>
+                <h3>Worst Setups by Avg R</h3>
+                <ul id="worstSetupList"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-rules" class="tab">
+          <div class="panel">
+            <h2>Rules</h2>
+            <p class="muted">Add custom rules. They immediately appear as Journal columns.</p>
+            <div class="rule-form">
+              <input id="ruleName" placeholder="Rule name (e.g. Enter only with VWAP reclaim)" />
+              <select id="ruleType">
+                <option value="checkbox">Checkbox (yes/no)</option>
+                <option value="select">Select (multiple states)</option>
+                <option value="text">Text note</option>
+              </select>
+              <input id="ruleOptions" placeholder="Options for select, comma-separated" />
+              <button id="addRuleBtn">+ Add Rule</button>
+            </div>
+            <ul id="ruleList" class="rule-list"></ul>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
