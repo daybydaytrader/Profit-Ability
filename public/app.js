@@ -38,6 +38,8 @@ const uiState = {
     drawingLine: null,
     history: [],
     future: [],
+    blockUntil: 0,
+    baseImage: null,
   },
 };
 
@@ -486,7 +488,7 @@ function syncEditorControls() {
   const lineColor = document.getElementById("lineColorInput");
   const textColor = document.getElementById("textColorInput");
   if (!menu || !stage || !frame || !canvas || !textOverlay || !modeSelect || !lineColor || !textColor) return;
-  menu.hidden = !editor.visible;
+  menu.hidden = !(editor.visible && editor.expanded);
   frame.classList.toggle("expanded", editor.expanded);
   canvas.classList.toggle("editable", editor.visible && editor.expanded && editor.mode === "line");
   textOverlay.classList.toggle("editable", editor.visible && editor.expanded);
@@ -496,13 +498,14 @@ function syncEditorControls() {
 }
 
 function resizeEditCanvas() {
-  const { canvas, img } = getImageEditorElements();
-  if (!canvas || !img) return;
-  const w = Math.max(1, Math.round(img.clientWidth));
-  const h = Math.max(1, Math.round(img.clientHeight));
+  const { canvas, stage } = getImageEditorElements();
+  if (!canvas || !stage) return;
+  const w = Math.max(1, Math.round(stage.clientWidth));
+  const h = Math.max(1, Math.round(stage.clientHeight));
   canvas.width = w;
   canvas.height = h;
 }
+
 
 function renderTextOverlay() {
   const { textOverlay, canvas } = getImageEditorElements();
@@ -526,6 +529,16 @@ function redrawEditCanvas() {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const base = uiState.imageEditor.baseImage;
+  if (base?.naturalWidth && base?.naturalHeight) {
+    const scale = Math.min(canvas.width / base.naturalWidth, canvas.height / base.naturalHeight);
+    const drawW = base.naturalWidth * scale;
+    const drawH = base.naturalHeight * scale;
+    const dx = (canvas.width - drawW) / 2;
+    const dy = (canvas.height - drawH) / 2;
+    ctx.drawImage(base, dx, dy, drawW, drawH);
+  }
 
   uiState.imageEditor.lines.forEach((line) => {
     if (!line.points?.length) return;
@@ -669,21 +682,27 @@ function applyScreenshotToSession(sessionId, file) {
 function openImageModal(src, sessionId) {
   const modal = document.getElementById("imageModal");
   const img = document.getElementById("imageModalImg");
-  if (!modal || !img) return;
+  const stage = document.getElementById("imageStage");
+  if (!modal || !img || !stage) return;
   uiState.activeImageSessionId = sessionId;
-  img.onload = () => {
+  uiState.imageEditor.blockUntil = Date.now() + 250;
+
+  const base = new Image();
+  base.onload = () => {
+    uiState.imageEditor.baseImage = base;
     resizeEditCanvas();
     redrawEditCanvas();
   };
+  base.src = src;
+
   img.src = src;
+  img.style.display = "none";
+
   modal.hidden = false;
   document.body.style.overflow = "hidden";
   resetImageEditorState();
-  if (img.complete) {
-    resizeEditCanvas();
-    redrawEditCanvas();
-  }
 }
+
 
 function closeImageModal() {
   const modal = document.getElementById("imageModal");
@@ -692,6 +711,11 @@ function closeImageModal() {
   modal.hidden = true;
   uiState.activeImageSessionId = null;
   img.removeAttribute("src");
+  img.style.display = "none";
+  const stage = document.getElementById("imageStage");
+  if (stage) stage.style.backgroundImage = "none";
+  uiState.imageEditor.blockUntil = 0;
+  uiState.imageEditor.baseImage = null;
   resetImageEditorState();
   if (document.getElementById("linkModal").hidden) document.body.style.overflow = "";
 }
@@ -1026,6 +1050,7 @@ document.getElementById("clearAllEditsBtn").addEventListener("click", () => {
 
 document.getElementById("imageStage").addEventListener("click", (e) => {
   const editor = uiState.imageEditor;
+  if (Date.now() < editor.blockUntil) return;
   if (e.target.closest(".text-box")) return;
 
   if (!editor.expanded) {
