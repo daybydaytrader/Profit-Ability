@@ -30,7 +30,7 @@ const uiState = {
   imageEditor: {
     visible: false,
     expanded: false,
-    mode: "line",
+    mode: "cursor",
     lineColor: "#ff5f7a",
     textColor: "#67d98d",
     lines: [],
@@ -461,6 +461,7 @@ function getImageEditorElements() {
     stage: document.getElementById("imageStage"),
     canvas: document.getElementById("imageEditCanvas"),
     img: document.getElementById("imageModalImg"),
+    textOverlay: document.getElementById("textOverlay"),
   };
 }
 
@@ -479,13 +480,15 @@ function syncEditorControls() {
   const menu = document.getElementById("imageEditMenu");
   const stage = document.getElementById("imageStage");
   const canvas = document.getElementById("imageEditCanvas");
+  const textOverlay = document.getElementById("textOverlay");
   const modeSelect = document.getElementById("editModeSelect");
   const lineColor = document.getElementById("lineColorInput");
   const textColor = document.getElementById("textColorInput");
-  if (!menu || !stage || !canvas || !modeSelect || !lineColor || !textColor) return;
+  if (!menu || !stage || !canvas || !textOverlay || !modeSelect || !lineColor || !textColor) return;
   menu.hidden = !editor.visible;
   stage.classList.toggle("expanded", editor.expanded);
-  canvas.classList.toggle("editable", editor.visible && editor.expanded);
+  canvas.classList.toggle("editable", editor.visible && editor.expanded && editor.mode === "line");
+  textOverlay.classList.toggle("editable", editor.visible && editor.expanded);
   modeSelect.value = editor.mode;
   lineColor.value = editor.lineColor;
   textColor.value = editor.textColor;
@@ -498,6 +501,23 @@ function resizeEditCanvas() {
   const h = Math.max(1, Math.round(img.clientHeight));
   canvas.width = w;
   canvas.height = h;
+}
+
+function renderTextOverlay() {
+  const { textOverlay, canvas } = getImageEditorElements();
+  if (!textOverlay || !canvas) return;
+  const editor = uiState.imageEditor;
+  textOverlay.innerHTML = editor.texts
+    .map((txt) => {
+      const left = txt.x * canvas.width;
+      const top = txt.y * canvas.height;
+      const width = Math.max(80, (txt.w || 0.2) * canvas.width);
+      const height = Math.max(36, (txt.h || 0.12) * canvas.height);
+      return `<div class="text-box" data-text-id="${txt.id}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px;">
+        <textarea style="color:${escapeHtml(txt.color || editor.textColor)};">${escapeHtml(txt.text || "")}</textarea>
+      </div>`;
+    })
+    .join("");
 }
 
 function redrawEditCanvas() {
@@ -522,12 +542,6 @@ function redrawEditCanvas() {
     ctx.stroke();
   });
 
-  uiState.imageEditor.texts.forEach((txt) => {
-    ctx.fillStyle = txt.color || "#67d98d";
-    ctx.font = "16px Inter, system-ui, sans-serif";
-    ctx.fillText(txt.text || "", txt.x * canvas.width, txt.y * canvas.height);
-  });
-
   const current = uiState.imageEditor.drawingLine;
   if (current?.points?.length) {
     ctx.strokeStyle = current.color || "#ff5f7a";
@@ -541,11 +555,14 @@ function redrawEditCanvas() {
     });
     ctx.stroke();
   }
+
+  renderTextOverlay();
 }
 
 function resetImageEditorState() {
   uiState.imageEditor.visible = false;
   uiState.imageEditor.expanded = false;
+  uiState.imageEditor.mode = "cursor";
   uiState.imageEditor.lines = [];
   uiState.imageEditor.texts = [];
   uiState.imageEditor.drawingLine = null;
@@ -563,6 +580,19 @@ function editorPointFromEvent(e) {
     x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
     y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
   };
+}
+
+function updateTextFromNode(box) {
+  const id = box.dataset.textId;
+  const txt = uiState.imageEditor.texts.find((item) => item.id === id);
+  if (!txt) return;
+  const { canvas } = getImageEditorElements();
+  const area = box.querySelector("textarea");
+  if (!canvas || !area) return;
+  txt.text = area.value;
+  txt.color = area.style.color || txt.color;
+  txt.w = Math.max(80, box.offsetWidth) / canvas.width;
+  txt.h = Math.max(36, box.offsetHeight) / canvas.height;
 }
 
 function undoEditor() {
@@ -990,17 +1020,46 @@ document.getElementById("clearAllEditsBtn").addEventListener("click", () => {
 });
 
 document.getElementById("imageStage").addEventListener("click", (e) => {
-  if (e.target.id === "imageEditCanvas") return;
   const editor = uiState.imageEditor;
-  editor.expanded = !editor.expanded;
-  editor.visible = editor.expanded;
-  syncEditorControls();
+  if (e.target.closest(".text-box")) return;
+
+  if (!editor.expanded) {
+    editor.expanded = true;
+    editor.visible = true;
+    syncEditorControls();
+    return;
+  }
+
+  if (editor.mode === "text") {
+    const point = editorPointFromEvent(e);
+    if (!point) return;
+    pushEditorHistory();
+    editor.texts.push({
+      id: `txt${Date.now()}`,
+      x: point.x,
+      y: point.y,
+      w: 0.22,
+      h: 0.14,
+      text: "",
+      color: editor.textColor,
+    });
+    redrawEditCanvas();
+    const last = document.querySelector('.text-box:last-child textarea');
+    if (last) last.focus();
+    return;
+  }
+
+  if (editor.mode === "cursor") {
+    editor.expanded = false;
+    editor.visible = false;
+    syncEditorControls();
+  }
 });
 
 const editCanvas = document.getElementById("imageEditCanvas");
 editCanvas.addEventListener("pointerdown", (e) => {
   const editor = uiState.imageEditor;
-  if (!editor.visible || !editor.expanded) return;
+  if (!editor.visible || !editor.expanded || editor.mode !== "line") return;
   const point = editorPointFromEvent(e);
   if (!point) return;
 
@@ -1013,13 +1072,6 @@ editCanvas.addEventListener("pointerdown", (e) => {
     return;
   }
 
-  if (editor.mode === "text") {
-    const text = window.prompt("Text label:");
-    if (!text) return;
-    pushEditorHistory();
-    editor.texts.push({ x: point.x, y: point.y, text, color: editor.textColor });
-    redrawEditCanvas();
-  }
 });
 
 editCanvas.addEventListener("pointermove", (e) => {
@@ -1038,6 +1090,62 @@ editCanvas.addEventListener("pointerup", (e) => {
   if (editor.drawingLine.points.length > 1) editor.lines.push(editor.drawingLine);
   editor.drawingLine = null;
   redrawEditCanvas();
+});
+
+
+const textOverlay = document.getElementById("textOverlay");
+let draggingText = null;
+textOverlay.addEventListener("pointerdown", (e) => {
+  const editor = uiState.imageEditor;
+  if (!editor.visible || !editor.expanded || editor.mode !== "cursor") return;
+  const box = e.target.closest(".text-box");
+  if (!box || e.target.tagName === "TEXTAREA") return;
+  const rect = box.getBoundingClientRect();
+  pushEditorHistory();
+  draggingText = {
+    id: box.dataset.textId,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top,
+  };
+  box.classList.add("dragging");
+  textOverlay.setPointerCapture(e.pointerId);
+});
+
+textOverlay.addEventListener("pointermove", (e) => {
+  if (!draggingText) return;
+  const { canvas } = getImageEditorElements();
+  const txt = uiState.imageEditor.texts.find((item) => item.id === draggingText.id);
+  if (!txt || !canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left - draggingText.offsetX) / rect.width;
+  const y = (e.clientY - rect.top - draggingText.offsetY) / rect.height;
+  txt.x = Math.min(0.95, Math.max(0, x));
+  txt.y = Math.min(0.95, Math.max(0, y));
+  renderTextOverlay();
+});
+
+textOverlay.addEventListener("pointerup", (e) => {
+  if (!draggingText) return;
+  const box = textOverlay.querySelector(`[data-text-id="${draggingText.id}"]`);
+  if (box) box.classList.remove("dragging");
+  if (textOverlay.hasPointerCapture(e.pointerId)) textOverlay.releasePointerCapture(e.pointerId);
+  draggingText = null;
+});
+
+textOverlay.addEventListener("input", (e) => {
+  const box = e.target.closest(".text-box");
+  if (!box) return;
+  updateTextFromNode(box);
+});
+textOverlay.addEventListener("focusout", (e) => {
+  const box = e.target.closest(".text-box");
+  if (!box) return;
+  updateTextFromNode(box);
+});
+textOverlay.addEventListener("mouseup", (e) => {
+  const box = e.target.closest(".text-box");
+  if (!box) return;
+  updateTextFromNode(box);
 });
 
 window.addEventListener("resize", () => {

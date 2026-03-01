@@ -130,6 +130,7 @@
 
         <div id="imageEditMenu" class="image-edit-menu" hidden>
           <select id="editModeSelect">
+            <option value="cursor">Cursor</option>
             <option value="line">Line</option>
             <option value="text">Text</option>
           </select>
@@ -145,6 +146,7 @@
         <div id="imageStage" class="image-stage">
           <img id="imageModalImg" alt="Session screenshot" />
           <canvas id="imageEditCanvas"></canvas>
+          <div id="textOverlay" class="text-overlay"></div>
         </div>
         <input id="modalShotInput" type="file" accept="image/*" hidden />
       </div>
