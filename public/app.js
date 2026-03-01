@@ -24,6 +24,7 @@ const seed = {
 };
 
 const state = loadState();
+const uiState = { activeImageSessionId: null };
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -59,6 +60,7 @@ function normalizeSession(session) {
     mistakes: String(session.mistakes || "").slice(0, SESSION_TEXT_MAX),
     correctDecisions: String(session.correctDecisions || "").slice(0, SESSION_TEXT_MAX),
     rules: session.rules || {},
+    screenshot: typeof session.screenshot === "string" ? session.screenshot : "",
     collapsed: Boolean(session.collapsed),
     trades: Array.isArray(session.trades) ? session.trades.map(normalizeTrade) : [],
   };
@@ -333,6 +335,9 @@ function renderJournal() {
             <textarea class="session-input session-expandable" data-expandable data-session-k="mistakes" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.mistakes || "")}</textarea>
             <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
           </label>
+          <div class="session-shot-wrap">
+            ${s.screenshot ? `<button type="button" class="session-shot" data-shot-preview="${s.id}" title="Open screenshot"><img src="${escapeHtml(s.screenshot)}" alt="Session screenshot"/><span class="shot-corner-arrow" data-upload-shot="${s.id}" title="Change screenshot">↗</span></button>` : `<button type="button" class="session-shot session-shot-empty" data-upload-shot="${s.id}">Add screenshot</button>`}
+          </div>
           <div class="net-result-wrap">
             <div class="muted">Net</div>
             <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">$${net.toFixed(2)}</div>
@@ -344,6 +349,7 @@ function renderJournal() {
           </label>
           <div class="session-top-actions">
             <button data-del-session="${s.id}">Delete Session</button>
+            <input type="file" accept="image/*" hidden data-session-shot-input="${s.id}" />
           </div>
         </div>
 
@@ -399,6 +405,39 @@ function renderMistakes() {
   document.getElementById("worstSetupList").innerHTML = worst.length
     ? worst.map((s) => `<li>${escapeHtml(s.setup)}: ${s.avg.toFixed(2)}R</li>`).join("")
     : "<li>No setup data yet.</li>";
+}
+
+
+function applyScreenshotToSession(sessionId, file) {
+  const session = state.sessions.find((sessionItem) => sessionItem.id === sessionId);
+  if (!session || !file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    session.screenshot = String(reader.result || "");
+    rerender();
+    if (uiState.activeImageSessionId === sessionId) openImageModal(session.screenshot, sessionId);
+  };
+  reader.readAsDataURL(file);
+}
+
+function openImageModal(src, sessionId) {
+  const modal = document.getElementById("imageModal");
+  const img = document.getElementById("imageModalImg");
+  if (!modal || !img) return;
+  uiState.activeImageSessionId = sessionId;
+  img.src = src;
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeImageModal() {
+  const modal = document.getElementById("imageModal");
+  const img = document.getElementById("imageModalImg");
+  if (!modal || !img) return;
+  modal.hidden = true;
+  uiState.activeImageSessionId = null;
+  img.removeAttribute("src");
+  document.body.style.overflow = "";
 }
 
 function rerender() {
@@ -589,8 +628,24 @@ document.getElementById("sessionList").addEventListener("input", (e) => {
   }
 });
 
+
+document.getElementById("modalShotInput").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file || !uiState.activeImageSessionId) return;
+  applyScreenshotToSession(uiState.activeImageSessionId, file);
+  e.target.value = "";
+});
+
 document.getElementById("sessionList").addEventListener("change", (e) => {
   const t = e.target;
+  if (t.dataset.sessionShotInput) {
+    const file = t.files?.[0];
+    if (!file) return;
+    applyScreenshotToSession(t.dataset.sessionShotInput, file);
+    t.value = "";
+    return;
+  }
+
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
     if (t.tagName === "TEXTAREA") updateAllCounters();
@@ -629,6 +684,21 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
     return;
   }
 
+  const uploadShotId = e.target.closest("[data-upload-shot]")?.dataset.uploadShot;
+  if (uploadShotId) {
+    const fileInput = document.querySelector(`[data-session-shot-input="${uploadShotId}"]`);
+    if (fileInput) fileInput.click();
+    return;
+  }
+
+  const shotPreviewId = e.target.closest("[data-shot-preview]")?.dataset.shotPreview;
+  if (shotPreviewId) {
+    const session = state.sessions.find((s) => s.id === shotPreviewId);
+    if (!session?.screenshot) return;
+    openImageModal(session.screenshot, shotPreviewId);
+    return;
+  }
+
   const sessionId = e.target.dataset.delSession;
   if (sessionId) {
     state.sessions = state.sessions.filter((s) => s.id !== sessionId);
@@ -645,6 +715,23 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
     session.trades = session.trades.filter((t) => t.id !== tradeId);
     rerender();
   }
+});
+
+
+document.getElementById("imageModal").addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-image-modal]")) {
+    closeImageModal();
+    return;
+  }
+
+  if (e.target.closest("[data-modal-change-shot]")) {
+    const modalInput = document.getElementById("modalShotInput");
+    if (modalInput) modalInput.click();
+  }
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeImageModal();
 });
 
 document.getElementById("ruleList").addEventListener("click", (e) => {

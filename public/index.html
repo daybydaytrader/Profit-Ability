@@ -101,6 +101,18 @@
       </main>
     </div>
 
+
+
+    <div id="imageModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop" data-close-image-modal></div>
+      <div class="image-modal-content">
+        <button class="image-modal-close" type="button" data-close-image-modal aria-label="Close image">✕</button>
+        <button class="image-modal-change" type="button" data-modal-change-shot aria-label="Change screenshot">↗</button>
+        <img id="imageModalImg" alt="Session screenshot" />
+        <input id="modalShotInput" type="file" accept="image/*" hidden />
+      </div>
+    </div>
+
     <script src="app.js"></script>
   </body>
 </html>
