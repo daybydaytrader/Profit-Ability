@@ -45,12 +45,53 @@ button.danger { border-color: #7a2f46; color: #ffc8d4; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
 .session-list-column { display: grid; gap: 12px; margin-top: 10px; }
-.session-card { background: #101a33; border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
-.session-top { display: grid; gap: 8px; grid-template-columns: auto 1fr 2fr 1fr 1fr auto; }
-.session-rules { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 8px; }
-.session-actions { margin-top: 8px; display: flex; gap: 8px; }
-
+.session-card { background: #101a33; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.session-top { display: grid; gap: 12px; grid-template-columns: auto 1fr 2fr auto 2fr auto; align-items: start; }
+.session-top label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.session-rules { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
+.session-rules label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.session-actions { margin-top: 10px; display: flex; gap: 8px; }
 .session-top-actions { display: flex; gap: 8px; align-items: center; }
+
+.net-result-wrap { display: grid; gap: 6px; align-content: start; }
+.net-result {
+  min-height: 39px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0d1833;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+
+.field-with-counter { position: relative; }
+.char-counter {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.session-input {
+  padding-right: 56px;
+}
+
+textarea.session-input {
+  resize: none;
+  min-height: 42px;
+  line-height: 1.25;
+}
+
+.session-expandable:hover,
+.session-expandable:focus {
+  min-height: 110px;
+  white-space: pre-wrap;
+  z-index: 5;
+}
 
 .collapse-arrow {
   width: 34px;
@@ -64,7 +105,7 @@ button.danger { border-color: #7a2f46; color: #ffc8d4; }
 }
 
 canvas { width: 100%; height: 260px; background: #0f1730; border-radius: 10px; }
-.table-wrap { overflow-x: auto; margin-top: 8px; }
+.table-wrap { overflow-x: auto; margin-top: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
 

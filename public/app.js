@@ -1,4 +1,5 @@
 const STORAGE_KEY = "trading_dashboard_state_v2";
+const SESSION_TEXT_MAX = 300;
 
 const seed = {
   rules: [
@@ -30,22 +31,32 @@ const seed = {
 
 const state = loadState();
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
 function normalizeSession(session) {
   return {
     id: session.id || `s${Date.now()}`,
     date: session.date || new Date().toISOString().slice(0, 10),
-    mistakes: session.mistakes || "",
-    correctDecisions: session.correctDecisions || "",
+    mistakes: String(session.mistakes || "").slice(0, SESSION_TEXT_MAX),
+    correctDecisions: String(session.correctDecisions || "").slice(0, SESSION_TEXT_MAX),
     rules: session.rules || {},
     collapsed: Boolean(session.collapsed),
-    trades: Array.isArray(session.trades) ? session.trades.map((t) => ({
-      id: t.id || `t${Date.now()}`,
-      symbol: t.symbol || "",
-      setup: t.setup || "",
-      r: Number(t.r || 0),
-      entry: Number(t.entry || 0),
-      exit: Number(t.exit || 0),
-    })) : [],
+    trades: Array.isArray(session.trades)
+      ? session.trades.map((t) => ({
+          id: t.id || `t${Date.now()}`,
+          symbol: t.symbol || "",
+          setup: t.setup || "",
+          r: Number(t.r || 0),
+          entry: Number(t.entry || 0),
+          exit: Number(t.exit || 0),
+        }))
+      : [],
   };
 }
 
@@ -218,54 +229,79 @@ function renderOverview() {
 }
 
 function renderSessionRules(session) {
-  return state.rules.map((rule) => {
-    const val = session.rules?.[rule.id];
-    if (rule.type === "checkbox") {
-      return `<label>${rule.name}<input data-session-rule="${rule.id}" data-session-id="${session.id}" type="checkbox" ${val ? "checked" : ""}/></label>`;
-    }
-    if (rule.type === "select") {
-      return `<label>${rule.name}<select data-session-rule="${rule.id}" data-session-id="${session.id}"><option value="">—</option>${rule.options.map((o) => `<option ${val === o ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
-    }
-    return `<label>${rule.name}<input data-session-rule="${rule.id}" data-session-id="${session.id}" value="${val || ""}"/></label>`;
-  }).join("");
+  return state.rules
+    .map((rule) => {
+      const val = session.rules?.[rule.id];
+      if (rule.type === "checkbox") {
+        return `<label>${rule.name}<input data-session-rule="${rule.id}" data-session-id="${session.id}" type="checkbox" ${val ? "checked" : ""}/></label>`;
+      }
+      if (rule.type === "select") {
+        return `<label>${rule.name}<select data-session-rule="${rule.id}" data-session-id="${session.id}"><option value="">—</option>${rule.options.map((o) => `<option ${val === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select></label>`;
+      }
+      const safeVal = escapeHtml(val || "");
+      return `
+        <label class="field-with-counter">${rule.name}
+          <textarea class="session-input session-expandable" data-expandable data-session-rule="${rule.id}" data-session-id="${session.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${safeVal}</textarea>
+          <span class="char-counter" data-counter-for="${rule.id}" data-counter-scope="rule">0/${SESSION_TEXT_MAX}</span>
+        </label>
+      `;
+    })
+    .join("");
 }
 
 function renderSessionTrades(session) {
-  const rows = (session.trades || []).map((t) => {
-    const pnl = calcTradePnl(t);
-    return `
+  const rows = (session.trades || [])
+    .map((t) => {
+      const pnl = calcTradePnl(t);
+      return `
       <tr>
-        <td><input data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}" value="${t.symbol || ""}"/></td>
-        <td><input data-trade-k="setup" data-session-id="${session.id}" data-trade-id="${t.id}" value="${t.setup || ""}"/></td>
+        <td><input data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}" value="${escapeHtml(t.symbol || "")}"/></td>
+        <td><input data-trade-k="setup" data-session-id="${session.id}" data-trade-id="${t.id}" value="${escapeHtml(t.setup || "")}"/></td>
         <td><input data-trade-k="r" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.1" value="${t.r ?? 0}"/></td>
         <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${t.entry ?? 0}"/></td>
         <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${t.exit ?? 0}"/></td>
-        <td class="${pnl >= 0 ? "good" : "bad"}">${money(pnl)}</td>
+        <td data-trade-pnl="${t.id}" class="${pnl >= 0 ? "good" : "bad"}">${money(pnl)}</td>
         <td><button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button></td>
       </tr>
     `;
-  }).join("");
+    })
+    .join("");
 
   return rows || `<tr><td colspan="7" class="muted">No trades yet.</td></tr>`;
 }
 
 function renderJournal() {
-  const html = state.sessions.map((s) => {
-    const net = getSessionNet(s);
-    return `
-      <article class="session-card">
+  const html = state.sessions
+    .map((s) => {
+      const net = getSessionNet(s);
+      return `
+      <article class="session-card" data-session-card="${s.id}">
         <div class="session-top">
           <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
-          <label>Date<input data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/></label>
-          <label>Mistakes<input data-session-k="mistakes" data-session-id="${s.id}" value="${s.mistakes || ""}"/></label>
-          <label>Net<input value="${money(net)}" readonly /></label>
-          <label>Correct Decisions<input data-session-k="correctDecisions" data-session-id="${s.id}" value="${s.correctDecisions || ""}"/></label>
+          <label>Date
+            <input type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
+          </label>
+          <label class="field-with-counter">Mistakes
+            <textarea class="session-input session-expandable" data-expandable data-session-k="mistakes" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.mistakes || "")}</textarea>
+            <span class="char-counter" data-counter-for="mistakes" data-session-id="${s.id}">0/${SESSION_TEXT_MAX}</span>
+          </label>
+          <div class="net-result-wrap">
+            <div class="muted">Net</div>
+            <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">${money(net)}</div>
+          </div>
+          <label class="field-with-counter">Correct Decisions
+            <textarea class="session-input session-expandable" data-expandable data-session-k="correctDecisions" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.correctDecisions || "")}</textarea>
+            <span class="char-counter" data-counter-for="correctDecisions" data-session-id="${s.id}">0/${SESSION_TEXT_MAX}</span>
+          </label>
           <div class="session-top-actions">
             <button data-del-session="${s.id}">Delete Session</button>
           </div>
         </div>
         <div class="session-rules">${renderSessionRules(s) || '<span class="muted">No rules yet.</span>'}</div>
-        ${s.collapsed ? "" : `
+        ${
+          s.collapsed
+            ? ""
+            : `
           <div class="session-actions">
             <span class="pill">${s.trades.length} trades</span>
             <button data-add-trade="${s.id}">+ Add Trade</button>
@@ -280,31 +316,42 @@ function renderJournal() {
               </tbody>
             </table>
           </div>
-        `}
+        `
+        }
       </article>
     `;
-  }).join("");
+    })
+    .join("");
 
   document.getElementById("sessionList").innerHTML = html;
+  updateAllCounters();
 }
 
 function renderRules() {
   document.getElementById("ruleList").innerHTML =
-    state.rules.map((r) => `<li><strong>${r.name}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`).join("")
-    || "<li>No rules yet.</li>";
+    state.rules
+      .map(
+        (r) =>
+          `<li><strong>${escapeHtml(r.name)}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.map(escapeHtml).join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`
+      )
+      .join("") || "<li>No rules yet.</li>";
 }
 
 function renderMistakes() {
   const mistakeMap = new Map();
   state.sessions.forEach((s) => {
-    (s.mistakes || "").split(",").map((x) => x.trim()).filter(Boolean).forEach((m) => {
-      mistakeMap.set(m, (mistakeMap.get(m) || 0) + 1);
-    });
+    (s.mistakes || "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .forEach((m) => {
+        mistakeMap.set(m, (mistakeMap.get(m) || 0) + 1);
+      });
   });
 
   const top = [...mistakeMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   document.getElementById("mistakeList").innerHTML = top.length
-    ? top.map(([m, n]) => `<li>${m} (${n})</li>`).join("")
+    ? top.map(([m, n]) => `<li>${escapeHtml(m)} (${n})</li>`).join("")
     : "<li>No mistakes logged yet.</li>";
 
   const bySetup = new Map();
@@ -319,7 +366,7 @@ function renderMistakes() {
     .slice(0, 5);
 
   document.getElementById("worstSetupList").innerHTML = worstSetups.length
-    ? worstSetups.map((s) => `<li>${s.setup}: ${s.avg.toFixed(2)}R</li>`).join("")
+    ? worstSetups.map((s) => `<li>${escapeHtml(s.setup)}: ${s.avg.toFixed(2)}R</li>`).join("")
     : "<li>No setup data yet.</li>";
 }
 
@@ -332,14 +379,16 @@ function rerender() {
 }
 
 function addSession() {
-  state.sessions.unshift(normalizeSession({
-    id: `s${Date.now()}`,
-    date: new Date().toISOString().slice(0, 10),
-    mistakes: "",
-    correctDecisions: "",
-    rules: {},
-    trades: [],
-  }));
+  state.sessions.unshift(
+    normalizeSession({
+      id: `s${Date.now()}`,
+      date: new Date().toISOString().slice(0, 10),
+      mistakes: "",
+      correctDecisions: "",
+      rules: {},
+      trades: [],
+    })
+  );
   rerender();
 }
 
@@ -366,7 +415,7 @@ function addRule() {
 }
 
 function exportBackup() {
-  const payload = { version: 3, exportedAt: new Date().toISOString(), data: state };
+  const payload = { version: 4, exportedAt: new Date().toISOString(), data: state };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -407,24 +456,71 @@ function updateSessionField(target) {
   if (!session) return;
 
   if (target.dataset.sessionK) {
-    session[target.dataset.sessionK] = target.value;
+    if (["mistakes", "correctDecisions"].includes(target.dataset.sessionK)) {
+      session[target.dataset.sessionK] = String(target.value).slice(0, SESSION_TEXT_MAX);
+    } else {
+      session[target.dataset.sessionK] = target.value;
+    }
   }
 
   if (target.dataset.sessionRule) {
     const rid = target.dataset.sessionRule;
-    session.rules[rid] = target.type === "checkbox" ? target.checked : target.value;
+    const inputType = target.type;
+    if (inputType === "checkbox") {
+      session.rules[rid] = target.checked;
+    } else if (target.tagName === "TEXTAREA") {
+      session.rules[rid] = String(target.value).slice(0, SESSION_TEXT_MAX);
+    } else {
+      session.rules[rid] = target.value;
+    }
   }
 }
 
 function updateTradeField(target) {
   const session = state.sessions.find((s) => s.id === target.dataset.sessionId);
-  if (!session) return;
+  if (!session) return null;
   const trade = session.trades.find((t) => t.id === target.dataset.tradeId);
-  if (!trade) return;
+  if (!trade) return null;
 
   const key = target.dataset.tradeK;
-  if (!key) return;
+  if (!key) return null;
   trade[key] = ["r", "entry", "exit"].includes(key) ? Number(target.value || 0) : target.value;
+  return { session, trade };
+}
+
+function updateAllCounters() {
+  document.querySelectorAll("textarea[maxlength]").forEach((el) => {
+    const key = el.dataset.sessionK || el.dataset.sessionRule;
+    const sessionId = el.dataset.sessionId;
+    const selector = el.dataset.sessionK
+      ? `.char-counter[data-counter-for="${key}"][data-session-id="${sessionId}"]`
+      : `.char-counter[data-counter-for="${key}"][data-counter-scope="rule"]`;
+    const counter = el.closest("label")?.querySelector(".char-counter") || document.querySelector(selector);
+    if (counter) counter.textContent = `${el.value.length}/${SESSION_TEXT_MAX}`;
+  });
+}
+
+function updateTradeComputedUI(sessionId, tradeId) {
+  const session = state.sessions.find((s) => s.id === sessionId);
+  if (!session) return;
+  const trade = session.trades.find((t) => t.id === tradeId);
+  if (!trade) return;
+
+  const pnlCell = document.querySelector(`[data-trade-pnl="${tradeId}"]`);
+  if (pnlCell) {
+    const pnl = calcTradePnl(trade);
+    pnlCell.textContent = money(pnl);
+    pnlCell.classList.toggle("good", pnl >= 0);
+    pnlCell.classList.toggle("bad", pnl < 0);
+  }
+
+  const sessionNetEl = document.querySelector(`[data-session-net="${sessionId}"]`);
+  if (sessionNetEl) {
+    const sessionNet = getSessionNet(session);
+    sessionNetEl.textContent = money(sessionNet);
+    sessionNetEl.classList.toggle("good", sessionNet >= 0);
+    sessionNetEl.classList.toggle("bad", sessionNet < 0);
+  }
 }
 
 function refreshAnalyticsOnly() {
@@ -450,12 +546,14 @@ document.getElementById("sessionList").addEventListener("input", (e) => {
   const t = e.target;
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
+    if (t.tagName === "TEXTAREA") updateAllCounters();
     refreshAnalyticsOnly();
   }
+
   if (t.dataset.tradeK) {
-    updateTradeField(t);
+    const updated = updateTradeField(t);
+    if (updated) updateTradeComputedUI(updated.session.id, updated.trade.id);
     refreshAnalyticsOnly();
-    renderJournal();
   }
 });
 
@@ -463,12 +561,14 @@ document.getElementById("sessionList").addEventListener("change", (e) => {
   const t = e.target;
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
+    if (t.tagName === "TEXTAREA") updateAllCounters();
     refreshAnalyticsOnly();
   }
+
   if (t.dataset.tradeK) {
-    updateTradeField(t);
+    const updated = updateTradeField(t);
+    if (updated) updateTradeComputedUI(updated.session.id, updated.trade.id);
     refreshAnalyticsOnly();
-    renderJournal();
   }
 });
 

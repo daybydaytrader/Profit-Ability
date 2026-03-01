@@ -14,10 +14,10 @@ Open: <http://localhost:4173>
 ## Journal model (updated)
 
 - **Session-level fields**:
-  - Date
-  - Mistakes
-  - Net (auto-calculated from trades)
-  - Correct Decisions
+  - Date (calendar date picker)
+  - Mistakes (max 300 chars + live counter)
+  - Net (result-style value, auto-calculated from trades)
+  - Correct Decisions (max 300 chars + live counter)
   - Rules (dynamic from Rules page)
 - **Trade-level fields inside each session**:
   - Symbol
@@ -33,7 +33,8 @@ Open: <http://localhost:4173>
 - Add/remove sessions
 - Collapse/expand each session card via left arrow (▶ collapsed, ▼ open)
 - Add/remove trades inside each session
-- Edit session-level and trade-level fields inline
+- Edit session-level and trade-level fields inline without typing interruption
+- Hover/focus behavior for session text fields to expand and show full text
 - Rules builder and dynamic session-level rule inputs
 - Habit analytics on Overview
 - Mistake + setup analytics on Mistakes tab
