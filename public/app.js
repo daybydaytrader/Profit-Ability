@@ -155,16 +155,13 @@ function metrics() {
   const wins = allTrades.filter((t) => calcTradePnl(t) > 0).length;
   const winRate = allTrades.length ? (wins / allTrades.length) * 100 : 0;
 
-  const checkboxRules = state.rules.filter((r) => r.type === "checkbox");
-  const totalChecks = checkboxRules.length * state.sessions.length;
-  let passedChecks = 0;
-  state.sessions.forEach((s) => {
-    checkboxRules.forEach((r) => {
-      if (Boolean(s.rules?.[r.id])) passedChecks += 1;
-    });
-  });
+  const sessionAdherences = state.sessions
+    .map((session) => getSessionRuleAdherence(session))
+    .filter((value) => value !== null);
+  const ruleScore = sessionAdherences.length
+    ? sessionAdherences.reduce((acc, value) => acc + value, 0) / sessionAdherences.length
+    : 0;
 
-  const ruleScore = totalChecks ? (passedChecks / totalChecks) * 100 : 0;
   return { net, trades: allTrades.length, sessions: state.sessions.length, winRate, ruleScore };
 }
 
@@ -249,7 +246,7 @@ function renderOverview() {
     ["Sessions", `${m.sessions}`, true],
     ["Trades", `${m.trades}`, true],
     ["Win Rate", `${m.winRate.toFixed(1)}%`, m.winRate >= 50],
-    ["Rule Discipline", `${m.ruleScore.toFixed(1)}%`, m.ruleScore >= 80],
+    ["Rule Adherence", `${m.ruleScore.toFixed(1)}%`, m.ruleScore >= 80],
   ];
   document.getElementById("scorecards").innerHTML = cards
     .map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`)
