@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trading Transparency Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <h1>Trading OS</h1>
+        <p class="muted">Your habits dashboard</p>
+
+        <nav id="navTabs" class="nav-tabs">
+          <button data-tab="overview" class="active">Overview</button>
+          <button data-tab="journal">Journal</button>
+          <button data-tab="mistakes">Mistakes</button>
+          <button data-tab="rules">Rules</button>
+        </nav>
+
+        <div class="panel utilities">
+          <h3>Data Controls</h3>
+          <button id="exportBtn">Export backup (.json)</button>
+          <button id="importBtn">Import backup</button>
+          <button id="resetBtn" class="danger">Reset to demo data</button>
+          <input id="importInput" type="file" accept="application/json" hidden />
+          <p class="muted small" id="saveStatus">Saved locally in this browser.</p>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section id="tab-overview" class="tab active">
+          <div class="panel">
+            <h2>Overview</h2>
+            <p class="muted">Focus on consistency and your recurring habits.</p>
+            <div id="scorecards" class="cards"></div>
+          </div>
+          <div class="panel">
+            <h3>Equity Curve</h3>
+            <canvas id="equityChart" width="980" height="260"></canvas>
+          </div>
+          <div class="grid2">
+            <div class="panel">
+              <h3>Best Habits</h3>
+              <ul id="bestHabits"></ul>
+            </div>
+            <div class="panel">
+              <h3>Worst Habits</h3>
+              <ul id="worstHabits"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-journal" class="tab">
+          <div class="panel">
+            <h2>Journal</h2>
+            <button id="addSessionBtn">+ Add Session</button>
+            <div id="sessionList" class="session-list-column"></div>
+          </div>
+        </section>
+
+        <section id="tab-mistakes" class="tab">
+          <div class="panel">
+            <h2>Mistakes</h2>
+            <p class="muted">Where leaks are costing you the most.</p>
+            <div class="grid2">
+              <div>
+                <h3>Top Mistakes</h3>
+                <ul id="mistakeList"></ul>
+              </div>
+              <div>
+                <h3>Worst Setups by Avg R</h3>
+                <ul id="worstSetupList"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-rules" class="tab">
+          <div class="panel">
+            <h2>Rules</h2>
+            <p class="muted">Add custom rules. They appear at the Session level in Journal.</p>
+            <div class="rule-form">
+              <input id="ruleName" placeholder="Rule name (e.g. Traded only A+ setup)" />
+              <select id="ruleType">
+                <option value="checkbox">Checkbox (yes/no)</option>
+                <option value="select">Select (multiple states)</option>
+                <option value="text">Text note</option>
+              </select>
+              <input id="ruleOptions" placeholder="Options for select, comma-separated" />
+              <button id="addRuleBtn">+ Add Rule</button>
+            </div>
+            <ul id="ruleList" class="rule-list"></ul>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
