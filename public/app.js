@@ -29,7 +29,7 @@ const uiState = {
   activeLinkSessionId: null,
   imageEditor: {
     visible: false,
-    zoomed: false,
+    expanded: false,
     mode: "line",
     lineColor: "#ff5f7a",
     textColor: "#67d98d",
@@ -484,8 +484,8 @@ function syncEditorControls() {
   const textColor = document.getElementById("textColorInput");
   if (!menu || !stage || !canvas || !modeSelect || !lineColor || !textColor) return;
   menu.hidden = !editor.visible;
-  stage.classList.toggle("zoomed", editor.zoomed);
-  canvas.classList.toggle("editable", editor.visible && editor.zoomed);
+  stage.classList.toggle("expanded", editor.expanded);
+  canvas.classList.toggle("editable", editor.visible && editor.expanded);
   modeSelect.value = editor.mode;
   lineColor.value = editor.lineColor;
   textColor.value = editor.textColor;
@@ -545,7 +545,7 @@ function redrawEditCanvas() {
 
 function resetImageEditorState() {
   uiState.imageEditor.visible = false;
-  uiState.imageEditor.zoomed = false;
+  uiState.imageEditor.expanded = false;
   uiState.imageEditor.lines = [];
   uiState.imageEditor.texts = [];
   uiState.imageEditor.drawingLine = null;
@@ -959,10 +959,6 @@ document.getElementById("linkModal").addEventListener("click", (e) => {
   if (e.target.matches("[data-close-link-modal]")) closeLinkModal();
 });
 
-document.getElementById("toggleEditBtn").addEventListener("click", () => {
-  uiState.imageEditor.visible = !uiState.imageEditor.visible;
-  syncEditorControls();
-});
 
 document.getElementById("editModeSelect").addEventListener("change", (e) => {
   uiState.imageEditor.mode = e.target.value;
@@ -996,15 +992,15 @@ document.getElementById("clearAllEditsBtn").addEventListener("click", () => {
 document.getElementById("imageStage").addEventListener("click", (e) => {
   if (e.target.id === "imageEditCanvas") return;
   const editor = uiState.imageEditor;
-  editor.zoomed = !editor.zoomed;
-  if (!editor.zoomed) editor.visible = false;
+  editor.expanded = !editor.expanded;
+  editor.visible = editor.expanded;
   syncEditorControls();
 });
 
 const editCanvas = document.getElementById("imageEditCanvas");
 editCanvas.addEventListener("pointerdown", (e) => {
   const editor = uiState.imageEditor;
-  if (!editor.visible || !editor.zoomed) return;
+  if (!editor.visible || !editor.expanded) return;
   const point = editorPointFromEvent(e);
   if (!point) return;
 

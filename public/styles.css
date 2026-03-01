@@ -301,7 +301,7 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
   transition: transform 0.2s ease;
   cursor: zoom-in;
 }
-.image-stage.zoomed {
+.image-stage.expanded {
   transform: scale(1.5);
   cursor: zoom-out;
 }
@@ -342,18 +342,6 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 .image-edit-menu input[type="color"] {
   min-height: 30px;
   padding: 4px 6px;
-}
-.image-modal-cleanup {
-  position: absolute;
-  top: 8px;
-  right: 94px;
-  min-width: 42px;
-  min-height: 42px;
-  border-radius: 999px;
-  padding: 0;
-  font-size: 16px;
-  font-weight: 800;
-  z-index: 4;
 }
 
 .net-result-wrap { display: grid; gap: 6px; align-content: start; }
