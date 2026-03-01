@@ -479,14 +479,15 @@ function syncEditorControls() {
   const editor = uiState.imageEditor;
   const menu = document.getElementById("imageEditMenu");
   const stage = document.getElementById("imageStage");
+  const frame = document.querySelector(".image-modal-content.image-modal-editor-shell");
   const canvas = document.getElementById("imageEditCanvas");
   const textOverlay = document.getElementById("textOverlay");
   const modeSelect = document.getElementById("editModeSelect");
   const lineColor = document.getElementById("lineColorInput");
   const textColor = document.getElementById("textColorInput");
-  if (!menu || !stage || !canvas || !textOverlay || !modeSelect || !lineColor || !textColor) return;
+  if (!menu || !stage || !frame || !canvas || !textOverlay || !modeSelect || !lineColor || !textColor) return;
   menu.hidden = !editor.visible;
-  stage.classList.toggle("expanded", editor.expanded);
+  frame.classList.toggle("expanded", editor.expanded);
   canvas.classList.toggle("editable", editor.visible && editor.expanded && editor.mode === "line");
   textOverlay.classList.toggle("editable", editor.visible && editor.expanded);
   modeSelect.value = editor.mode;
@@ -670,14 +671,18 @@ function openImageModal(src, sessionId) {
   const img = document.getElementById("imageModalImg");
   if (!modal || !img) return;
   uiState.activeImageSessionId = sessionId;
-  img.src = src;
-  modal.hidden = false;
-  document.body.style.overflow = "hidden";
   img.onload = () => {
     resizeEditCanvas();
     redrawEditCanvas();
   };
+  img.src = src;
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
   resetImageEditorState();
+  if (img.complete) {
+    resizeEditCanvas();
+    redrawEditCanvas();
+  }
 }
 
 function closeImageModal() {

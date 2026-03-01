@@ -266,8 +266,11 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 }
 .image-modal-content img {
   display: block;
+  width: 100%;
   max-width: 100%;
+  height: auto;
   max-height: calc(100vh - 90px);
+  object-fit: contain;
   border-radius: 10px;
 }
 .image-modal-close {
@@ -295,16 +298,28 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 .image-modal-editor-shell {
   overflow: hidden;
 }
-.image-stage {
-  position: relative;
-  transform-origin: center center;
-  transition: transform 0.2s ease;
-  cursor: zoom-in;
+
+.image-modal-content.image-modal-editor-shell {
+  width: min(72vw, 860px);
 }
-.image-stage.expanded {
-  transform: scale(1.5);
+.image-modal-content.image-modal-editor-shell.expanded {
+  width: min(94vw, 1280px);
+}
+.image-modal-content.image-modal-editor-shell.expanded #imageModalImg {
+  max-height: calc(100vh - 130px);
+}
+.image-modal-content.image-modal-editor-shell.expanded .image-stage {
   cursor: zoom-out;
 }
+.image-stage {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: zoom-in;
+}
+
 #imageEditCanvas {
   position: absolute;
   inset: 0;
