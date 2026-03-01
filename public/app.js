@@ -40,6 +40,7 @@ const uiState = {
     future: [],
     blockUntil: 0,
     baseImage: null,
+    selectedTextId: null,
   },
 };
 
@@ -491,7 +492,7 @@ function syncEditorControls() {
   menu.hidden = !(editor.visible && editor.expanded);
   frame.classList.toggle("expanded", editor.expanded);
   canvas.classList.toggle("editable", editor.visible && editor.expanded && editor.mode === "line");
-  textOverlay.classList.toggle("editable", editor.visible && editor.expanded);
+  textOverlay.classList.toggle("editable", editor.visible && editor.expanded && editor.mode !== "line");
   modeSelect.value = editor.mode;
   lineColor.value = editor.lineColor;
   textColor.value = editor.textColor;
@@ -517,7 +518,9 @@ function renderTextOverlay() {
       const top = txt.y * canvas.height;
       const width = Math.max(80, (txt.w || 0.2) * canvas.width);
       const height = Math.max(36, (txt.h || 0.12) * canvas.height);
-      return `<div class="text-box" data-text-id="${txt.id}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px;">
+      const selected = editor.selectedTextId === txt.id ? " selected" : "";
+      return `<div class="text-box${selected}" data-text-id="${txt.id}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px;">
+        <div class="text-box-handle" title="Drag"></div>
         <textarea style="color:${escapeHtml(txt.color || editor.textColor)};">${escapeHtml(txt.text || "")}</textarea>
       </div>`;
     })
@@ -582,6 +585,7 @@ function resetImageEditorState() {
   uiState.imageEditor.drawingLine = null;
   uiState.imageEditor.history = [];
   uiState.imageEditor.future = [];
+  uiState.imageEditor.selectedTextId = null;
   syncEditorControls();
   redrawEditCanvas();
 }
@@ -1052,6 +1056,10 @@ document.getElementById("imageStage").addEventListener("click", (e) => {
   const editor = uiState.imageEditor;
   if (Date.now() < editor.blockUntil) return;
   if (e.target.closest(".text-box")) return;
+  if (editor.selectedTextId) {
+    editor.selectedTextId = null;
+    renderTextOverlay();
+  }
 
   if (!editor.expanded) {
     editor.expanded = true;
@@ -1073,6 +1081,7 @@ document.getElementById("imageStage").addEventListener("click", (e) => {
       text: "",
       color: editor.textColor,
     });
+    editor.selectedTextId = editor.texts[editor.texts.length - 1].id;
     redrawEditCanvas();
     const last = document.querySelector('.text-box:last-child textarea');
     if (last) last.focus();
@@ -1129,7 +1138,19 @@ textOverlay.addEventListener("pointerdown", (e) => {
   const editor = uiState.imageEditor;
   if (!editor.visible || !editor.expanded || editor.mode !== "cursor") return;
   const box = e.target.closest(".text-box");
-  if (!box || e.target.tagName === "TEXTAREA") return;
+  if (!box) {
+    if (editor.selectedTextId) {
+      editor.selectedTextId = null;
+      renderTextOverlay();
+    }
+    return;
+  }
+  if (editor.selectedTextId !== box.dataset.textId) {
+    editor.selectedTextId = box.dataset.textId;
+    renderTextOverlay();
+    return;
+  }
+  if (!e.target.closest(".text-box-handle") && e.target.tagName === "TEXTAREA") return;
   const rect = box.getBoundingClientRect();
   pushEditorHistory();
   draggingText = {
