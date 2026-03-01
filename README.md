@@ -1,6 +1,6 @@
-# Trading Transparency Dashboard (Local MVP)
+# DayByDay Dashboard (Local MVP)
 
-This MVP is in-app editable (no CSV upload required), supports **session-first journaling**, and includes backup import/export controls.
+This MVP is in-app editable (no CSV upload required), supports **session-first journaling**, and now uses the **DayByDay** branding/theme with backup import/export controls.
 
 ## Run locally
 

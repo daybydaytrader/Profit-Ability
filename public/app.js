@@ -1,7 +1,9 @@
 const STORAGE_KEY = "trading_dashboard_state_v2";
 const SESSION_TEXT_MAX = 300;
+const DEFAULT_STARTING_BALANCE = 50000;
 
 const seed = {
+  accountStart: DEFAULT_STARTING_BALANCE,
   rules: [
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
     { id: "r2", name: "Market condition", type: "select", options: ["Trending", "Choppy", "News-driven"] },
@@ -100,7 +102,12 @@ function loadState() {
   parsed = migrateLegacyToSessions(parsed);
   const rules = Array.isArray(parsed.rules) ? parsed.rules : [];
   const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeSession) : [];
-  return { rules, sessions: sessions.length ? sessions : structuredClone(seed.sessions) };
+  const accountStart = Number(parsed.accountStart);
+  return {
+    accountStart: Number.isFinite(accountStart) && accountStart >= 0 ? accountStart : DEFAULT_STARTING_BALANCE,
+    rules,
+    sessions: sessions.length ? sessions : structuredClone(seed.sessions),
+  };
 }
 
 function saveState() {
@@ -138,9 +145,8 @@ function getSessionNet(session) {
 function getSessionRuleAdherence(session) {
   const checks = state.rules.filter((r) => r.type === "checkbox");
   if (!checks.length) return null;
-  const values = checks.map((r) => session.rules?.[r.id]).filter((v) => typeof v === "boolean");
-  if (!values.length) return 0;
-  return (values.filter(Boolean).length / values.length) * 100;
+  const passed = checks.filter((r) => Boolean(session.rules?.[r.id])).length;
+  return (passed / checks.length) * 100;
 }
 
 function metrics() {
@@ -149,19 +155,13 @@ function metrics() {
   const wins = allTrades.filter((t) => calcTradePnl(t) > 0).length;
   const winRate = allTrades.length ? (wins / allTrades.length) * 100 : 0;
 
-  const checkboxRules = state.rules.filter((r) => r.type === "checkbox");
-  let totalChecks = 0;
-  let passedChecks = 0;
-  state.sessions.forEach((s) => {
-    checkboxRules.forEach((r) => {
-      if (typeof s.rules?.[r.id] === "boolean") {
-        totalChecks += 1;
-        if (s.rules[r.id]) passedChecks += 1;
-      }
-    });
-  });
+  const sessionAdherences = state.sessions
+    .map((session) => getSessionRuleAdherence(session))
+    .filter((value) => value !== null);
+  const ruleScore = sessionAdherences.length
+    ? sessionAdherences.reduce((acc, value) => acc + value, 0) / sessionAdherences.length
+    : 0;
 
-  const ruleScore = totalChecks ? (passedChecks / totalChecks) * 100 : 0;
   return { net, trades: allTrades.length, sessions: state.sessions.length, winRate, ruleScore };
 }
 
@@ -172,42 +172,81 @@ function drawEquity() {
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const points = [10000];
-  getAllTrades().forEach((t) => points.push(points.at(-1) + calcTradePnl(t)));
+  const sortedSessions = [...state.sessions].sort((a, b) => {
+    const da = new Date(a.date || 0).getTime();
+    const db = new Date(b.date || 0).getTime();
+    return da - db;
+  });
+
+  const labels = ["Start", ...sortedSessions.map((s) => s.date || "-")];
+  const points = [toNum(state.accountStart) || DEFAULT_STARTING_BALANCE];
+  sortedSessions.forEach((session) => points.push(points.at(-1) + getSessionNet(session)));
+
+  const left = 58;
+  const right = 16;
+  const top = 16;
+  const bottom = 38;
+  const chartW = w - left - right;
+  const chartH = h - top - bottom;
 
   const min = Math.min(...points);
   const max = Math.max(...points);
   const range = max - min || 1;
 
-  ctx.strokeStyle = "#324576";
+  ctx.strokeStyle = "rgba(217, 221, 228, 0.24)";
+  ctx.lineWidth = 1;
   for (let i = 0; i < 4; i += 1) {
-    const y = 20 + i * ((h - 40) / 3);
+    const y = top + i * (chartH / 3);
     ctx.beginPath();
-    ctx.moveTo(36, y);
-    ctx.lineTo(w - 8, y);
+    ctx.moveTo(left, y);
+    ctx.lineTo(w - right, y);
     ctx.stroke();
+
+    const val = max - (i * range) / 3;
+    ctx.fillStyle = "#b6bbc6";
+    ctx.font = "12px Inter, system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`$${Math.round(val).toLocaleString()}`, left - 6, y + 4);
   }
 
-  ctx.strokeStyle = "#60a5fa";
+  ctx.strokeStyle = "#d9dde4";
   ctx.lineWidth = 2;
   ctx.beginPath();
   points.forEach((v, i) => {
-    const x = 36 + (i * (w - 50)) / Math.max(points.length - 1, 1);
-    const y = h - 20 - ((v - min) / range) * (h - 40);
+    const x = left + (i * chartW) / Math.max(points.length - 1, 1);
+    const y = top + ((max - v) / range) * chartH;
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
+
+  const xTickIndexes = points.length <= 6 ? [...points.keys()] : [0, ...Array.from({ length: 4 }, (_, idx) => Math.round(((idx + 1) * (points.length - 1)) / 5)), points.length - 1];
+  const uniqueIndexes = [...new Set(xTickIndexes)];
+
+  ctx.fillStyle = "#b6bbc6";
+  ctx.textAlign = "center";
+  uniqueIndexes.forEach((idx) => {
+    const x = left + (idx * chartW) / Math.max(points.length - 1, 1);
+    const label = labels[idx] === "Start" ? "Start" : labels[idx].slice(5);
+    ctx.beginPath();
+    ctx.moveTo(x, h - bottom + 2);
+    ctx.lineTo(x, h - bottom - 6);
+    ctx.strokeStyle = "rgba(217, 221, 228, 0.35)";
+    ctx.stroke();
+    ctx.fillText(label, x, h - 10);
+  });
 }
 
 function renderOverview() {
   const m = metrics();
+  const startInput = document.getElementById("startingBalanceInput");
+  if (startInput && document.activeElement !== startInput) startInput.value = String(Math.round(state.accountStart));
   const cards = [
     ["Net P/L", `$${m.net.toFixed(2)}`, m.net >= 0],
     ["Sessions", `${m.sessions}`, true],
     ["Trades", `${m.trades}`, true],
     ["Win Rate", `${m.winRate.toFixed(1)}%`, m.winRate >= 50],
-    ["Rule Discipline", `${m.ruleScore.toFixed(1)}%`, m.ruleScore >= 80],
+    ["Rule Adherence", `${m.ruleScore.toFixed(1)}%`, m.ruleScore >= 80],
   ];
   document.getElementById("scorecards").innerHTML = cards
     .map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`)
@@ -424,6 +463,7 @@ function importBackupFile(file) {
       const imported = parsed?.data || parsed;
       const migrated = migrateLegacyToSessions(imported);
       if (!Array.isArray(migrated?.sessions) || !Array.isArray(migrated?.rules)) throw new Error("Invalid backup format.");
+      state.accountStart = Number.isFinite(Number(migrated.accountStart)) && Number(migrated.accountStart) >= 0 ? Number(migrated.accountStart) : DEFAULT_STARTING_BALANCE;
       state.rules = migrated.rules;
       state.sessions = migrated.sessions.map(normalizeSession);
       rerender();
@@ -435,6 +475,7 @@ function importBackupFile(file) {
 }
 
 function resetToDemo() {
+  state.accountStart = seed.accountStart;
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions);
   rerender();
@@ -526,6 +567,12 @@ document.getElementById("exportBtn").addEventListener("click", exportBackup);
 document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importInput").click());
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
 document.getElementById("resetBtn").addEventListener("click", resetToDemo);
+
+document.getElementById("startingBalanceInput").addEventListener("input", (e) => {
+  const next = Number(e.target.value);
+  state.accountStart = Number.isFinite(next) && next >= 0 ? next : 0;
+  refreshAnalyticsOnly();
+});
 
 document.getElementById("sessionList").addEventListener("input", (e) => {
   const t = e.target;

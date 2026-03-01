@@ -3,14 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Trading Transparency Dashboard</title>
+    <title>DayByDay — Road to Profitability</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app">
       <aside class="sidebar">
-        <h1>Trading OS</h1>
-        <p class="muted">Your habits dashboard</p>
+        <h1 class="brand-title">DAY BY DAY</h1>
+        <p class="muted brand-sub">Road to Profitability</p>
 
         <nav id="navTabs" class="nav-tabs">
           <button data-tab="overview" class="active">Overview</button>
@@ -34,6 +35,9 @@
           <div class="panel">
             <h2>Overview</h2>
             <p class="muted">Focus on consistency and your recurring habits.</p>
+            <label class="account-input-wrap">Initial account equity
+              <input id="startingBalanceInput" type="number" min="0" step="100" placeholder="50000" />
+            </label>
             <div id="scorecards" class="cards"></div>
           </div>
           <div class="panel">
