@@ -24,7 +24,22 @@ const seed = {
 };
 
 const state = loadState();
-const uiState = { activeImageSessionId: null };
+const uiState = {
+  activeImageSessionId: null,
+  activeLinkSessionId: null,
+  imageEditor: {
+    visible: false,
+    zoomed: false,
+    mode: "line",
+    lineColor: "#ff5f7a",
+    textColor: "#67d98d",
+    lines: [],
+    texts: [],
+    drawingLine: null,
+    history: [],
+    future: [],
+  },
+};
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -61,6 +76,11 @@ function normalizeSession(session) {
     correctDecisions: String(session.correctDecisions || "").slice(0, SESSION_TEXT_MAX),
     rules: session.rules || {},
     screenshot: typeof session.screenshot === "string" ? session.screenshot : "",
+    videoLink: {
+      url: String(session.videoLink?.url || ""),
+      title: String(session.videoLink?.title || ""),
+      thumbnail: String(session.videoLink?.thumbnail || ""),
+    },
     collapsed: Boolean(session.collapsed),
     trades: Array.isArray(session.trades) ? session.trades.map(normalizeTrade) : [],
   };
@@ -319,6 +339,30 @@ function renderSessionTrades(session) {
   return rows || `<tr><td colspan="10" class="muted">No trades yet.</td></tr>`;
 }
 
+function parseYoutubeId(url) {
+  const value = String(url || "").trim();
+  if (!value) return "";
+  const match = value.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{6,})/);
+  return match ? match[1] : "";
+}
+
+function getYoutubeThumbnail(url) {
+  const id = parseYoutubeId(url);
+  return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : "";
+}
+
+async function getYoutubeTitle(url) {
+  try {
+    const endpoint = `https://noembed.com/embed?url=${encodeURIComponent(url)}`;
+    const res = await fetch(endpoint);
+    if (!res.ok) return "";
+    const data = await res.json();
+    return String(data?.title || "");
+  } catch {
+    return "";
+  }
+}
+
 function renderJournal() {
   const html = state.sessions
     .map((s) => {
@@ -329,8 +373,11 @@ function renderJournal() {
         <div class="session-top">
           <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
           <label>Date
-            <input type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
+            <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
           </label>
+          <div class="session-link-wrap">
+            ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty" data-open-link="${s.id}">Add Link</button>`}
+          </div>
           <label class="field-with-counter">Mistakes
             <textarea class="session-input session-expandable" data-expandable data-session-k="mistakes" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.mistakes || "")}</textarea>
             <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
@@ -343,7 +390,7 @@ function renderJournal() {
             <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">$${net.toFixed(2)}</div>
             <div class="adherence-badge ${adherence !== null && adherence >= 75 ? "good" : "bad"}">Rule Adherence: ${adherence === null ? "N/A" : `${adherence.toFixed(0)}%`}</div>
           </div>
-          <label class="field-with-counter">Correct Decisions
+          <label class="field-with-counter">Good Decisions
             <textarea class="session-input session-expandable" data-expandable data-session-k="correctDecisions" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.correctDecisions || "")}</textarea>
             <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
           </label>
@@ -408,6 +455,174 @@ function renderMistakes() {
 }
 
 
+function getImageEditorElements() {
+  return {
+    menu: document.getElementById("imageEditMenu"),
+    stage: document.getElementById("imageStage"),
+    canvas: document.getElementById("imageEditCanvas"),
+    img: document.getElementById("imageModalImg"),
+  };
+}
+
+function pushEditorHistory() {
+  const editor = uiState.imageEditor;
+  editor.history.push({
+    lines: structuredClone(editor.lines),
+    texts: structuredClone(editor.texts),
+  });
+  if (editor.history.length > 100) editor.history.shift();
+  editor.future = [];
+}
+
+function syncEditorControls() {
+  const editor = uiState.imageEditor;
+  const menu = document.getElementById("imageEditMenu");
+  const stage = document.getElementById("imageStage");
+  const canvas = document.getElementById("imageEditCanvas");
+  const modeSelect = document.getElementById("editModeSelect");
+  const lineColor = document.getElementById("lineColorInput");
+  const textColor = document.getElementById("textColorInput");
+  if (!menu || !stage || !canvas || !modeSelect || !lineColor || !textColor) return;
+  menu.hidden = !editor.visible;
+  stage.classList.toggle("zoomed", editor.zoomed);
+  canvas.classList.toggle("editable", editor.visible && editor.zoomed);
+  modeSelect.value = editor.mode;
+  lineColor.value = editor.lineColor;
+  textColor.value = editor.textColor;
+}
+
+function resizeEditCanvas() {
+  const { canvas, img } = getImageEditorElements();
+  if (!canvas || !img) return;
+  const w = Math.max(1, Math.round(img.clientWidth));
+  const h = Math.max(1, Math.round(img.clientHeight));
+  canvas.width = w;
+  canvas.height = h;
+}
+
+function redrawEditCanvas() {
+  const { canvas } = getImageEditorElements();
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  uiState.imageEditor.lines.forEach((line) => {
+    if (!line.points?.length) return;
+    ctx.strokeStyle = line.color || "#ff5f7a";
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    line.points.forEach((pt, index) => {
+      const x = pt.x * canvas.width;
+      const y = pt.y * canvas.height;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  uiState.imageEditor.texts.forEach((txt) => {
+    ctx.fillStyle = txt.color || "#67d98d";
+    ctx.font = "16px Inter, system-ui, sans-serif";
+    ctx.fillText(txt.text || "", txt.x * canvas.width, txt.y * canvas.height);
+  });
+
+  const current = uiState.imageEditor.drawingLine;
+  if (current?.points?.length) {
+    ctx.strokeStyle = current.color || "#ff5f7a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    current.points.forEach((pt, index) => {
+      const x = pt.x * canvas.width;
+      const y = pt.y * canvas.height;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+}
+
+function resetImageEditorState() {
+  uiState.imageEditor.visible = false;
+  uiState.imageEditor.zoomed = false;
+  uiState.imageEditor.lines = [];
+  uiState.imageEditor.texts = [];
+  uiState.imageEditor.drawingLine = null;
+  uiState.imageEditor.history = [];
+  uiState.imageEditor.future = [];
+  syncEditorControls();
+  redrawEditCanvas();
+}
+
+function editorPointFromEvent(e) {
+  const { canvas } = getImageEditorElements();
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+  };
+}
+
+function undoEditor() {
+  const editor = uiState.imageEditor;
+  const prev = editor.history.pop();
+  if (!prev) return;
+  editor.future.push({ lines: structuredClone(editor.lines), texts: structuredClone(editor.texts) });
+  editor.lines = prev.lines;
+  editor.texts = prev.texts;
+  redrawEditCanvas();
+}
+
+function redoEditor() {
+  const editor = uiState.imageEditor;
+  const next = editor.future.pop();
+  if (!next) return;
+  editor.history.push({ lines: structuredClone(editor.lines), texts: structuredClone(editor.texts) });
+  editor.lines = next.lines;
+  editor.texts = next.texts;
+  redrawEditCanvas();
+}
+
+function openLinkModal(sessionId) {
+  const session = state.sessions.find((s) => s.id === sessionId);
+  if (!session) return;
+  uiState.activeLinkSessionId = sessionId;
+  document.getElementById("linkUrlInput").value = session.videoLink?.url || "";
+  document.getElementById("linkTitleInput").value = session.videoLink?.title || "";
+  document.getElementById("linkModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeLinkModal() {
+  document.getElementById("linkModal").hidden = true;
+  uiState.activeLinkSessionId = null;
+  if (document.getElementById("imageModal").hidden) document.body.style.overflow = "";
+}
+
+async function saveLinkFromModal() {
+  if (!uiState.activeLinkSessionId) return;
+  const session = state.sessions.find((s) => s.id === uiState.activeLinkSessionId);
+  if (!session) return;
+  const url = document.getElementById("linkUrlInput").value.trim();
+  if (!url) {
+    session.videoLink = { url: "", title: "", thumbnail: "" };
+    closeLinkModal();
+    rerender();
+    return;
+  }
+  const manualTitle = document.getElementById("linkTitleInput").value.trim();
+  const detectedTitle = manualTitle || (await getYoutubeTitle(url)) || "YouTube Video";
+  session.videoLink = {
+    url,
+    title: detectedTitle,
+    thumbnail: getYoutubeThumbnail(url),
+  };
+  closeLinkModal();
+  rerender();
+}
+
 function applyScreenshotToSession(sessionId, file) {
   const session = state.sessions.find((sessionItem) => sessionItem.id === sessionId);
   if (!session || !file) return;
@@ -428,6 +643,11 @@ function openImageModal(src, sessionId) {
   img.src = src;
   modal.hidden = false;
   document.body.style.overflow = "hidden";
+  img.onload = () => {
+    resizeEditCanvas();
+    redrawEditCanvas();
+  };
+  resetImageEditorState();
 }
 
 function closeImageModal() {
@@ -437,7 +657,8 @@ function closeImageModal() {
   modal.hidden = true;
   uiState.activeImageSessionId = null;
   img.removeAttribute("src");
-  document.body.style.overflow = "";
+  resetImageEditorState();
+  if (document.getElementById("linkModal").hidden) document.body.style.overflow = "";
 }
 
 function rerender() {
@@ -684,6 +905,12 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
     return;
   }
 
+  const openLinkId = e.target.closest("[data-open-link]")?.dataset.openLink;
+  if (openLinkId) {
+    openLinkModal(openLinkId);
+    return;
+  }
+
   const uploadShotId = e.target.closest("[data-upload-shot]")?.dataset.uploadShot;
   if (uploadShotId) {
     const fileInput = document.querySelector(`[data-session-shot-input="${uploadShotId}"]`);
@@ -718,6 +945,111 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
 });
 
 
+document.getElementById("saveLinkBtn").addEventListener("click", saveLinkFromModal);
+document.getElementById("removeLinkBtn").addEventListener("click", () => {
+  if (!uiState.activeLinkSessionId) return;
+  const session = state.sessions.find((s) => s.id === uiState.activeLinkSessionId);
+  if (!session) return;
+  session.videoLink = { url: "", title: "", thumbnail: "" };
+  closeLinkModal();
+  rerender();
+});
+
+document.getElementById("linkModal").addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-link-modal]")) closeLinkModal();
+});
+
+document.getElementById("toggleEditBtn").addEventListener("click", () => {
+  uiState.imageEditor.visible = !uiState.imageEditor.visible;
+  syncEditorControls();
+});
+
+document.getElementById("editModeSelect").addEventListener("change", (e) => {
+  uiState.imageEditor.mode = e.target.value;
+});
+document.getElementById("lineColorInput").addEventListener("input", (e) => {
+  uiState.imageEditor.lineColor = e.target.value;
+});
+document.getElementById("textColorInput").addEventListener("input", (e) => {
+  uiState.imageEditor.textColor = e.target.value;
+});
+
+document.getElementById("undoEditBtn").addEventListener("click", undoEditor);
+document.getElementById("redoEditBtn").addEventListener("click", redoEditor);
+document.getElementById("clearLinesBtn").addEventListener("click", () => {
+  pushEditorHistory();
+  uiState.imageEditor.lines = [];
+  redrawEditCanvas();
+});
+document.getElementById("clearTextBtn").addEventListener("click", () => {
+  pushEditorHistory();
+  uiState.imageEditor.texts = [];
+  redrawEditCanvas();
+});
+document.getElementById("clearAllEditsBtn").addEventListener("click", () => {
+  pushEditorHistory();
+  uiState.imageEditor.lines = [];
+  uiState.imageEditor.texts = [];
+  redrawEditCanvas();
+});
+
+document.getElementById("imageStage").addEventListener("click", (e) => {
+  if (e.target.id === "imageEditCanvas") return;
+  const editor = uiState.imageEditor;
+  editor.zoomed = !editor.zoomed;
+  if (!editor.zoomed) editor.visible = false;
+  syncEditorControls();
+});
+
+const editCanvas = document.getElementById("imageEditCanvas");
+editCanvas.addEventListener("pointerdown", (e) => {
+  const editor = uiState.imageEditor;
+  if (!editor.visible || !editor.zoomed) return;
+  const point = editorPointFromEvent(e);
+  if (!point) return;
+
+  if (editor.mode === "line") {
+    e.preventDefault();
+    editCanvas.setPointerCapture(e.pointerId);
+    pushEditorHistory();
+    editor.drawingLine = { color: editor.lineColor, points: [point] };
+    redrawEditCanvas();
+    return;
+  }
+
+  if (editor.mode === "text") {
+    const text = window.prompt("Text label:");
+    if (!text) return;
+    pushEditorHistory();
+    editor.texts.push({ x: point.x, y: point.y, text, color: editor.textColor });
+    redrawEditCanvas();
+  }
+});
+
+editCanvas.addEventListener("pointermove", (e) => {
+  const editor = uiState.imageEditor;
+  if (!editor.drawingLine) return;
+  const point = editorPointFromEvent(e);
+  if (!point) return;
+  editor.drawingLine.points.push(point);
+  redrawEditCanvas();
+});
+
+editCanvas.addEventListener("pointerup", (e) => {
+  const editor = uiState.imageEditor;
+  if (!editor.drawingLine) return;
+  editCanvas.releasePointerCapture(e.pointerId);
+  if (editor.drawingLine.points.length > 1) editor.lines.push(editor.drawingLine);
+  editor.drawingLine = null;
+  redrawEditCanvas();
+});
+
+window.addEventListener("resize", () => {
+  if (document.getElementById("imageModal").hidden) return;
+  resizeEditCanvas();
+  redrawEditCanvas();
+});
+
 document.getElementById("imageModal").addEventListener("click", (e) => {
   if (e.target.matches("[data-close-image-modal]")) {
     closeImageModal();
@@ -731,7 +1063,9 @@ document.getElementById("imageModal").addEventListener("click", (e) => {
 });
 
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeImageModal();
+  if (e.key !== "Escape") return;
+  closeImageModal();
+  closeLinkModal();
 });
 
 document.getElementById("ruleList").addEventListener("click", (e) => {
