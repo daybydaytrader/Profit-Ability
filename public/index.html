@@ -55,14 +55,9 @@
         <section id="tab-journal" class="tab">
           <div class="panel">
             <h2>Journal</h2>
-            <p class="muted">Update trades directly here. Rule columns are generated from your Rules page.</p>
-            <button id="addTradeBtn">+ Add Trade</button>
-            <div class="table-wrap">
-              <table>
-                <thead id="journalHead"></thead>
-                <tbody id="journalBody"></tbody>
-              </table>
-            </div>
+            <p class="muted">Sessions hold Date / Mistakes / Net / Correct Decisions / Rules. Trades are nested and minimal.</p>
+            <button id="addSessionBtn">+ Add Session</button>
+            <div id="sessionList" class="session-list-column"></div>
           </div>
         </section>
 
@@ -86,9 +81,9 @@
         <section id="tab-rules" class="tab">
           <div class="panel">
             <h2>Rules</h2>
-            <p class="muted">Add custom rules. They immediately appear as Journal columns.</p>
+            <p class="muted">Add custom rules. They appear at the Session level in Journal.</p>
             <div class="rule-form">
-              <input id="ruleName" placeholder="Rule name (e.g. Enter only with VWAP reclaim)" />
+              <input id="ruleName" placeholder="Rule name (e.g. Traded only A+ setup)" />
               <select id="ruleType">
                 <option value="checkbox">Checkbox (yes/no)</option>
                 <option value="select">Select (multiple states)</option>

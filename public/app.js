@@ -5,23 +5,90 @@ const seed = {
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
     { id: "r2", name: "Market condition", type: "select", options: ["Trending", "Choppy", "News-driven"] },
   ],
-  trades: [
-    { id: "t1", date: "2026-02-24", symbol: "TSLA", setup: "ORB", r: 1.6, net: 420, mistakes: "", rules: { r1: true, r2: "Trending" } },
-    { id: "t2", date: "2026-02-25", symbol: "NVDA", setup: "Pullback", r: -1.1, net: -250, mistakes: "late entry, moved stop", rules: { r1: false, r2: "Choppy" } },
-    { id: "t3", date: "2026-02-26", symbol: "AAPL", setup: "VWAP Reclaim", r: 1.1, net: 280, mistakes: "", rules: { r1: true, r2: "Trending" } },
+  sessions: [
+    {
+      id: "s1",
+      date: "2026-02-24",
+      mistakes: "late entry",
+      correctDecisions: "Waited for breakout confirmation",
+      rules: { r1: true, r2: "Trending" },
+      trades: [
+        { id: "t1", symbol: "TSLA", setup: "ORB", r: 1.6, entry: 240.1, exit: 245.6 },
+        { id: "t2", symbol: "NVDA", setup: "Pullback", r: -1.1, entry: 801.2, exit: 799.0 },
+      ],
+    },
+    {
+      id: "s2",
+      date: "2026-02-25",
+      mistakes: "",
+      correctDecisions: "Cut loser quickly",
+      rules: { r1: true, r2: "Trending" },
+      trades: [{ id: "t3", symbol: "AAPL", setup: "VWAP Reclaim", r: 1.1, entry: 187.4, exit: 190.1 }],
+    },
   ],
 };
 
 const state = loadState();
 
+function normalizeSession(session) {
+  return {
+    id: session.id || `s${Date.now()}`,
+    date: session.date || new Date().toISOString().slice(0, 10),
+    mistakes: session.mistakes || "",
+    correctDecisions: session.correctDecisions || "",
+    rules: session.rules || {},
+    collapsed: Boolean(session.collapsed),
+    trades: Array.isArray(session.trades) ? session.trades.map((t) => ({
+      id: t.id || `t${Date.now()}`,
+      symbol: t.symbol || "",
+      setup: t.setup || "",
+      r: Number(t.r || 0),
+      entry: Number(t.entry || 0),
+      exit: Number(t.exit || 0),
+    })) : [],
+  };
+}
+
+function migrateLegacyToSessions(raw) {
+  if (Array.isArray(raw.sessions) && raw.sessions.length && raw.sessions[0].trades) {
+    return raw;
+  }
+
+  if (Array.isArray(raw.sessions) && Array.isArray(raw.trades)) {
+    const grouped = raw.sessions.map((s) => ({
+      id: s.id,
+      date: s.date || new Date().toISOString().slice(0, 10),
+      mistakes: s.mistakes || "",
+      correctDecisions: s.correctDecisions || "",
+      rules: s.rules || {},
+      trades: raw.trades
+        .filter((t) => t.sessionId === s.id)
+        .map((t) => ({ id: t.id, symbol: t.symbol, setup: t.setup, r: t.r, entry: t.entry || 0, exit: t.exit || 0 })),
+    }));
+    return { rules: raw.rules || [], sessions: grouped };
+  }
+
+  return raw;
+}
+
 function loadState() {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return structuredClone(seed);
+  let parsed;
   try {
-    return JSON.parse(raw);
+    parsed = raw ? JSON.parse(raw) : structuredClone(seed);
   } catch {
-    return structuredClone(seed);
+    parsed = structuredClone(seed);
   }
+
+  parsed = migrateLegacyToSessions(parsed);
+
+  const rules = Array.isArray(parsed.rules) ? parsed.rules : [];
+  const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeSession) : [];
+
+  return {
+    rules,
+    sessions: sessions.length ? sessions : structuredClone(seed.sessions),
+  };
 }
 
 function saveState() {
@@ -30,75 +97,48 @@ function saveState() {
   document.getElementById("saveStatus").textContent = `Saved locally • ${stamp}`;
 }
 
-function money(v) {
-  return `$${Number(v).toFixed(2)}`;
-}
-
 function switchTab(name) {
   document.querySelectorAll(".nav-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.id === `tab-${name}`));
 }
 
+function calcTradePnl(trade) {
+  return Number(trade.exit || 0) - Number(trade.entry || 0);
+}
+
+function getAllTrades() {
+  return state.sessions.flatMap((s) => s.trades || []);
+}
+
+function getSessionNet(session) {
+  return (session.trades || []).reduce((acc, t) => acc + calcTradePnl(t), 0);
+}
+
+function money(v) {
+  return `$${Number(v).toFixed(2)}`;
+}
+
 function metrics() {
-  const t = state.trades;
-  const net = t.reduce((a, x) => a + Number(x.net || 0), 0);
-  const wins = t.filter((x) => Number(x.r) > 0).length;
-  const winRate = t.length ? (wins / t.length) * 100 : 0;
-  const ruleChecks = state.rules.filter((r) => r.type === "checkbox");
+  const allTrades = getAllTrades();
+  const net = allTrades.reduce((a, t) => a + calcTradePnl(t), 0);
+  const wins = allTrades.filter((t) => calcTradePnl(t) > 0).length;
+  const winRate = allTrades.length ? (wins / allTrades.length) * 100 : 0;
+
+  const checkboxRules = state.rules.filter((r) => r.type === "checkbox");
   let totalChecks = 0;
   let passedChecks = 0;
 
-  t.forEach((tr) => {
-    ruleChecks.forEach((r) => {
-      if (typeof tr.rules?.[r.id] === "boolean") {
+  state.sessions.forEach((s) => {
+    checkboxRules.forEach((r) => {
+      if (typeof s.rules?.[r.id] === "boolean") {
         totalChecks += 1;
-        if (tr.rules[r.id]) passedChecks += 1;
+        if (s.rules[r.id]) passedChecks += 1;
       }
     });
   });
 
   const ruleScore = totalChecks ? (passedChecks / totalChecks) * 100 : 0;
-  return { net, trades: t.length, winRate, ruleScore };
-}
-
-function renderOverview() {
-  const m = metrics();
-  const cards = [
-    ["Net P/L", money(m.net), m.net >= 0],
-    ["Trades", `${m.trades}`, true],
-    ["Win Rate", `${m.winRate.toFixed(1)}%`, m.winRate >= 50],
-    ["Rule Discipline", `${m.ruleScore.toFixed(1)}%`, m.ruleScore >= 80],
-  ];
-
-  document.getElementById("scorecards").innerHTML = cards
-    .map(
-      ([label, value, good]) =>
-        `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`
-    )
-    .join("");
-
-  const habitScores = state.rules
-    .map((rule) => {
-      if (rule.type !== "checkbox") return null;
-      const vals = state.trades.map((t) => t.rules?.[rule.id]).filter((x) => typeof x === "boolean");
-      const pct = vals.length ? (vals.filter(Boolean).length / vals.length) * 100 : 0;
-      return { name: rule.name, pct };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.pct - a.pct);
-
-  const best = habitScores.slice(0, 3);
-  const worst = [...habitScores].reverse().slice(0, 3);
-
-  document.getElementById("bestHabits").innerHTML = best.length
-    ? best.map((h) => `<li>${h.name} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
-    : "<li>No checkbox rules yet.</li>";
-
-  document.getElementById("worstHabits").innerHTML = worst.length
-    ? worst.map((h) => `<li>${h.name} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
-    : "<li>No checkbox rules yet.</li>";
-
-  drawEquity();
+  return { net, trades: allTrades.length, sessions: state.sessions.length, winRate, ruleScore };
 }
 
 function drawEquity() {
@@ -108,9 +148,9 @@ function drawEquity() {
   const h = canvas.height;
 
   ctx.clearRect(0, 0, w, h);
-  const sorted = [...state.trades].sort((a, b) => a.date.localeCompare(b.date));
+  const trades = getAllTrades();
   const points = [10000];
-  sorted.forEach((t) => points.push(points.at(-1) + Number(t.net || 0)));
+  trades.forEach((t) => points.push(points.at(-1) + calcTradePnl(t)));
 
   const min = Math.min(...points);
   const max = Math.max(...points);
@@ -139,85 +179,147 @@ function drawEquity() {
   ctx.stroke();
 }
 
-function journalHeaders() {
-  const fixed = ["Date", "Symbol", "Setup", "R", "Net", "Mistakes"];
-  return [...fixed, ...state.rules.map((r) => r.name), "Actions"];
+function renderOverview() {
+  const m = metrics();
+  const cards = [
+    ["Net P/L", money(m.net), m.net >= 0],
+    ["Sessions", `${m.sessions}`, true],
+    ["Trades", `${m.trades}`, true],
+    ["Win Rate", `${m.winRate.toFixed(1)}%`, m.winRate >= 50],
+    ["Rule Discipline", `${m.ruleScore.toFixed(1)}%`, m.ruleScore >= 80],
+  ];
+
+  document.getElementById("scorecards").innerHTML = cards
+    .map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`)
+    .join("");
+
+  const habitScores = state.rules
+    .map((rule) => {
+      if (rule.type !== "checkbox") return null;
+      const vals = state.sessions.map((s) => s.rules?.[rule.id]).filter((x) => typeof x === "boolean");
+      const pct = vals.length ? (vals.filter(Boolean).length / vals.length) * 100 : 0;
+      return { name: rule.name, pct };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.pct - a.pct);
+
+  const best = habitScores.slice(0, 3);
+  const worst = [...habitScores].reverse().slice(0, 3);
+
+  document.getElementById("bestHabits").innerHTML = best.length
+    ? best.map((h) => `<li>${h.name} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
+    : "<li>No checkbox rules yet.</li>";
+
+  document.getElementById("worstHabits").innerHTML = worst.length
+    ? worst.map((h) => `<li>${h.name} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
+    : "<li>No checkbox rules yet.</li>";
+
+  drawEquity();
+}
+
+function renderSessionRules(session) {
+  return state.rules.map((rule) => {
+    const val = session.rules?.[rule.id];
+    if (rule.type === "checkbox") {
+      return `<label>${rule.name}<input data-session-rule="${rule.id}" data-session-id="${session.id}" type="checkbox" ${val ? "checked" : ""}/></label>`;
+    }
+    if (rule.type === "select") {
+      return `<label>${rule.name}<select data-session-rule="${rule.id}" data-session-id="${session.id}"><option value="">—</option>${rule.options.map((o) => `<option ${val === o ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+    }
+    return `<label>${rule.name}<input data-session-rule="${rule.id}" data-session-id="${session.id}" value="${val || ""}"/></label>`;
+  }).join("");
+}
+
+function renderSessionTrades(session) {
+  const rows = (session.trades || []).map((t) => {
+    const pnl = calcTradePnl(t);
+    return `
+      <tr>
+        <td><input data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}" value="${t.symbol || ""}"/></td>
+        <td><input data-trade-k="setup" data-session-id="${session.id}" data-trade-id="${t.id}" value="${t.setup || ""}"/></td>
+        <td><input data-trade-k="r" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.1" value="${t.r ?? 0}"/></td>
+        <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${t.entry ?? 0}"/></td>
+        <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${t.exit ?? 0}"/></td>
+        <td class="${pnl >= 0 ? "good" : "bad"}">${money(pnl)}</td>
+        <td><button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button></td>
+      </tr>
+    `;
+  }).join("");
+
+  return rows || `<tr><td colspan="7" class="muted">No trades yet.</td></tr>`;
 }
 
 function renderJournal() {
-  document.getElementById("journalHead").innerHTML = `<tr>${journalHeaders().map((h) => `<th>${h}</th>`).join("")}</tr>`;
-
-  const rows = state.trades
-    .map((t) => {
-      const fixed = `
-      <td><input data-k="date" data-id="${t.id}" value="${t.date || ""}"/></td>
-      <td><input data-k="symbol" data-id="${t.id}" value="${t.symbol || ""}"/></td>
-      <td><input data-k="setup" data-id="${t.id}" value="${t.setup || ""}"/></td>
-      <td><input data-k="r" data-id="${t.id}" type="number" step="0.1" value="${t.r ?? 0}"/></td>
-      <td><input data-k="net" data-id="${t.id}" type="number" step="0.01" value="${t.net ?? 0}"/></td>
-      <td><input data-k="mistakes" data-id="${t.id}" value="${t.mistakes || ""}"/></td>
+  const html = state.sessions.map((s) => {
+    const net = getSessionNet(s);
+    return `
+      <article class="session-card">
+        <div class="session-top">
+          <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
+          <label>Date<input data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/></label>
+          <label>Mistakes<input data-session-k="mistakes" data-session-id="${s.id}" value="${s.mistakes || ""}"/></label>
+          <label>Net<input value="${money(net)}" readonly /></label>
+          <label>Correct Decisions<input data-session-k="correctDecisions" data-session-id="${s.id}" value="${s.correctDecisions || ""}"/></label>
+          <div class="session-top-actions">
+            <button data-del-session="${s.id}">Delete Session</button>
+          </div>
+        </div>
+        <div class="session-rules">${renderSessionRules(s) || '<span class="muted">No rules yet.</span>'}</div>
+        ${s.collapsed ? "" : `
+          <div class="session-actions">
+            <span class="pill">${s.trades.length} trades</span>
+            <button data-add-trade="${s.id}">+ Add Trade</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Symbol</th><th>Setup</th><th>R</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                ${renderSessionTrades(s)}
+              </tbody>
+            </table>
+          </div>
+        `}
+      </article>
     `;
+  }).join("");
 
-      const ruleCells = state.rules
-        .map((rule) => {
-          const val = t.rules?.[rule.id];
-          if (rule.type === "checkbox") {
-            return `<td><input data-rule="${rule.id}" data-id="${t.id}" type="checkbox" ${val ? "checked" : ""}/></td>`;
-          }
-          if (rule.type === "select") {
-            return `<td><select data-rule="${rule.id}" data-id="${t.id}"><option value="">—</option>${rule.options
-              .map((o) => `<option ${val === o ? "selected" : ""}>${o}</option>`)
-              .join("")}</select></td>`;
-          }
-          return `<td><input data-rule="${rule.id}" data-id="${t.id}" value="${val || ""}"/></td>`;
-        })
-        .join("");
-
-      return `<tr>${fixed}${ruleCells}<td><button data-del="${t.id}">Delete</button></td></tr>`;
-    })
-    .join("");
-
-  document.getElementById("journalBody").innerHTML = rows || `<tr><td colspan="99">No trades yet.</td></tr>`;
+  document.getElementById("sessionList").innerHTML = html;
 }
 
 function renderRules() {
   document.getElementById("ruleList").innerHTML =
-    state.rules
-      .map(
-        (r) =>
-          `<li><strong>${r.name}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`
-      )
-      .join("") || "<li>No rules yet.</li>";
+    state.rules.map((r) => `<li><strong>${r.name}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`).join("")
+    || "<li>No rules yet.</li>";
 }
 
 function renderMistakes() {
-  const count = new Map();
-  state.trades.forEach((t) => {
-    (t.mistakes || "")
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .forEach((m) => count.set(m, (count.get(m) || 0) + 1));
+  const mistakeMap = new Map();
+  state.sessions.forEach((s) => {
+    (s.mistakes || "").split(",").map((x) => x.trim()).filter(Boolean).forEach((m) => {
+      mistakeMap.set(m, (mistakeMap.get(m) || 0) + 1);
+    });
   });
 
-  const top = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const top = [...mistakeMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   document.getElementById("mistakeList").innerHTML = top.length
     ? top.map(([m, n]) => `<li>${m} (${n})</li>`).join("")
     : "<li>No mistakes logged yet.</li>";
 
   const bySetup = new Map();
-  state.trades.forEach((t) => {
+  getAllTrades().forEach((t) => {
     if (!bySetup.has(t.setup)) bySetup.set(t.setup, []);
     bySetup.get(t.setup).push(Number(t.r || 0));
   });
 
-  const setupAvg = [...bySetup.entries()]
-    .map(([s, vals]) => ({ setup: s, avg: vals.reduce((a, v) => a + v, 0) / vals.length }))
+  const worstSetups = [...bySetup.entries()]
+    .map(([setup, vals]) => ({ setup, avg: vals.reduce((a, v) => a + v, 0) / vals.length }))
     .sort((a, b) => a.avg - b.avg)
     .slice(0, 5);
 
-  document.getElementById("worstSetupList").innerHTML = setupAvg.length
-    ? setupAvg.map((s) => `<li>${s.setup}: ${s.avg.toFixed(2)}R</li>`).join("")
+  document.getElementById("worstSetupList").innerHTML = worstSetups.length
+    ? worstSetups.map((s) => `<li>${s.setup}: ${s.avg.toFixed(2)}R</li>`).join("")
     : "<li>No setup data yet.</li>";
 }
 
@@ -229,17 +331,22 @@ function rerender() {
   renderMistakes();
 }
 
-function addTrade() {
-  state.trades.unshift({
-    id: `t${Date.now()}`,
+function addSession() {
+  state.sessions.unshift(normalizeSession({
+    id: `s${Date.now()}`,
     date: new Date().toISOString().slice(0, 10),
-    symbol: "",
-    setup: "",
-    r: 0,
-    net: 0,
     mistakes: "",
+    correctDecisions: "",
     rules: {},
-  });
+    trades: [],
+  }));
+  rerender();
+}
+
+function addTradeToSession(sessionId) {
+  const session = state.sessions.find((s) => s.id === sessionId);
+  if (!session) return;
+  session.trades.unshift({ id: `t${Date.now()}`, symbol: "", setup: "", r: 0, entry: 0, exit: 0 });
   rerender();
 }
 
@@ -250,18 +357,16 @@ function addRule() {
   if (!name) return;
 
   const options = type === "select" ? optionsRaw.split(",").map((x) => x.trim()).filter(Boolean) : [];
-  state.rules.push({ id: `r${Date.now()}`, name, type, options });
+  const newRule = { id: `r${Date.now()}`, name, type, options };
+  state.rules.push(newRule);
+
   document.getElementById("ruleName").value = "";
   document.getElementById("ruleOptions").value = "";
   rerender();
 }
 
 function exportBackup() {
-  const payload = {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    data: state,
-  };
+  const payload = { version: 3, exportedAt: new Date().toISOString(), data: state };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -278,11 +383,11 @@ function importBackupFile(file) {
     try {
       const parsed = JSON.parse(reader.result);
       const imported = parsed?.data || parsed;
-      if (!Array.isArray(imported?.trades) || !Array.isArray(imported?.rules)) {
-        throw new Error("Invalid backup format.");
-      }
-      state.rules = imported.rules;
-      state.trades = imported.trades;
+      const migrated = migrateLegacyToSessions(imported);
+      if (!Array.isArray(migrated?.sessions) || !Array.isArray(migrated?.rules)) throw new Error("Invalid backup format.");
+
+      state.rules = migrated.rules;
+      state.sessions = migrated.sessions.map(normalizeSession);
       rerender();
     } catch (err) {
       alert(`Import failed: ${err.message}`);
@@ -293,8 +398,39 @@ function importBackupFile(file) {
 
 function resetToDemo() {
   state.rules = structuredClone(seed.rules);
-  state.trades = structuredClone(seed.trades);
+  state.sessions = structuredClone(seed.sessions);
   rerender();
+}
+
+function updateSessionField(target) {
+  const session = state.sessions.find((s) => s.id === target.dataset.sessionId);
+  if (!session) return;
+
+  if (target.dataset.sessionK) {
+    session[target.dataset.sessionK] = target.value;
+  }
+
+  if (target.dataset.sessionRule) {
+    const rid = target.dataset.sessionRule;
+    session.rules[rid] = target.type === "checkbox" ? target.checked : target.value;
+  }
+}
+
+function updateTradeField(target) {
+  const session = state.sessions.find((s) => s.id === target.dataset.sessionId);
+  if (!session) return;
+  const trade = session.trades.find((t) => t.id === target.dataset.tradeId);
+  if (!trade) return;
+
+  const key = target.dataset.tradeK;
+  if (!key) return;
+  trade[key] = ["r", "entry", "exit"].includes(key) ? Number(target.value || 0) : target.value;
+}
+
+function refreshAnalyticsOnly() {
+  saveState();
+  renderOverview();
+  renderMistakes();
 }
 
 document.getElementById("navTabs").addEventListener("click", (e) => {
@@ -303,47 +439,79 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
   switchTab(btn.dataset.tab);
 });
 
-document.getElementById("addTradeBtn").addEventListener("click", addTrade);
+document.getElementById("addSessionBtn").addEventListener("click", addSession);
 document.getElementById("addRuleBtn").addEventListener("click", addRule);
 document.getElementById("exportBtn").addEventListener("click", exportBackup);
 document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importInput").click());
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
 document.getElementById("resetBtn").addEventListener("click", resetToDemo);
 
-document.getElementById("journalBody").addEventListener("input", (e) => {
-  const id = e.target.dataset.id;
-  const trade = state.trades.find((t) => t.id === id);
-  if (!trade) return;
-
-  if (e.target.dataset.k) {
-    const key = e.target.dataset.k;
-    const val = ["r", "net"].includes(key) ? Number(e.target.value || 0) : e.target.value;
-    trade[key] = val;
+document.getElementById("sessionList").addEventListener("input", (e) => {
+  const t = e.target;
+  if (t.dataset.sessionK || t.dataset.sessionRule) {
+    updateSessionField(t);
+    refreshAnalyticsOnly();
   }
-
-  if (e.target.dataset.rule) {
-    const rid = e.target.dataset.rule;
-    const inputType = e.target.type;
-    if (!trade.rules) trade.rules = {};
-    trade.rules[rid] = inputType === "checkbox" ? e.target.checked : e.target.value;
+  if (t.dataset.tradeK) {
+    updateTradeField(t);
+    refreshAnalyticsOnly();
+    renderJournal();
   }
-
-  rerender();
 });
 
-document.getElementById("journalBody").addEventListener("click", (e) => {
-  const id = e.target.dataset.del;
-  if (!id) return;
-  state.trades = state.trades.filter((t) => t.id !== id);
-  rerender();
+document.getElementById("sessionList").addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset.sessionK || t.dataset.sessionRule) {
+    updateSessionField(t);
+    refreshAnalyticsOnly();
+  }
+  if (t.dataset.tradeK) {
+    updateTradeField(t);
+    refreshAnalyticsOnly();
+    renderJournal();
+  }
+});
+
+document.getElementById("sessionList").addEventListener("click", (e) => {
+  const addTradeSessionId = e.target.dataset.addTrade;
+  if (addTradeSessionId) {
+    addTradeToSession(addTradeSessionId);
+    return;
+  }
+
+  const toggleSessionId = e.target.dataset.toggleSession;
+  if (toggleSessionId) {
+    const session = state.sessions.find((s) => s.id === toggleSessionId);
+    if (!session) return;
+    session.collapsed = !session.collapsed;
+    rerender();
+    return;
+  }
+
+  const sessionId = e.target.dataset.delSession;
+  if (sessionId) {
+    state.sessions = state.sessions.filter((s) => s.id !== sessionId);
+    if (!state.sessions.length) addSession();
+    else rerender();
+    return;
+  }
+
+  const tradeId = e.target.dataset.delTrade;
+  if (tradeId) {
+    const parentSessionId = e.target.dataset.sessionId;
+    const session = state.sessions.find((s) => s.id === parentSessionId);
+    if (!session) return;
+    session.trades = session.trades.filter((t) => t.id !== tradeId);
+    rerender();
+  }
 });
 
 document.getElementById("ruleList").addEventListener("click", (e) => {
   const rid = e.target.dataset.removeRule;
   if (!rid) return;
   state.rules = state.rules.filter((r) => r.id !== rid);
-  state.trades.forEach((t) => {
-    if (t.rules) delete t.rules[rid];
+  state.sessions.forEach((s) => {
+    if (s.rules) delete s.rules[rid];
   });
   rerender();
 });
