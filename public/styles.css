@@ -66,6 +66,18 @@ button.danger { border-color: #7a2f46; color: #ffc8d4; }
   padding: 8px 12px;
 }
 
+.adherence-badge {
+  margin-top: 6px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+}
+.adherence-badge.good { background: rgba(31,181,93,.2); border-color: #28cf6c; }
+.adherence-badge.bad { background: rgba(228,61,85,.2); border-color: #ff5f79; }
+
 .field-with-counter { position: relative; }
 .char-counter {
   position: absolute;
@@ -76,16 +88,12 @@ button.danger { border-color: #7a2f46; color: #ffc8d4; }
   pointer-events: none;
 }
 
-.session-input {
-  padding-right: 56px;
-}
-
+.session-input { padding-right: 56px; }
 textarea.session-input {
   resize: none;
   min-height: 42px;
   line-height: 1.25;
 }
-
 .session-expandable:hover,
 .session-expandable:focus {
   min-height: 110px;
@@ -102,6 +110,24 @@ textarea.session-input {
   justify-content: center;
   font-size: 14px;
   padding: 0;
+}
+
+.rule-pill {
+  border-radius: 10px;
+  border: 1px solid transparent;
+  min-height: 34px;
+  font-weight: 700;
+  width: 100%;
+}
+.rule-pill.is-true {
+  background: #1fb55d;
+  color: #04240f;
+  border-color: #28cf6c;
+}
+.rule-pill.is-false {
+  background: #e43d55;
+  color: #2b0610;
+  border-color: #ff5f79;
 }
 
 canvas { width: 100%; height: 260px; background: #0f1730; border-radius: 10px; }

@@ -16,16 +16,27 @@ Open: <http://localhost:4173>
 - **Session-level fields**:
   - Date (calendar date picker)
   - Mistakes (max 300 chars + live counter)
-  - Net (result-style value, auto-calculated from trades)
+  - Net (result-style USD value, auto-calculated from trades)
   - Correct Decisions (max 300 chars + live counter)
+  - Rule Adherence % score per session (green if `>=75%`, red if `<75%`)
   - Rules (dynamic from Rules page)
 - **Trade-level fields inside each session**:
   - Symbol
   - Setup
-  - R
-  - Entry
-  - Exit
-  - PnL (auto-calculated as `exit - entry`)
+  - Type (`long` / `short`)
+  - Size
+  - Entry (numeric)
+  - Exit (numeric)
+  - Stop (numeric)
+  - R (read-only) = `ceil((abs(exit - entry) / stop) * 10) / 10`
+  - PnL auto-calculated as: `(size * 2) * (exit - entry)`
+
+## UX behavior
+
+- Entry/Exit fields stay numeric (no currency symbol formatting).
+- PnL and Net are displayed in USD (prefixed with `$`).
+- Rule checkbox-type values are rectangular red/green toggle buttons with the rule label inside the button.
+- Session textareas expand on hover/focus to reveal full text and stay expanded while focused.
 
 ## What you can test visually
 
@@ -34,10 +45,7 @@ Open: <http://localhost:4173>
 - Collapse/expand each session card via left arrow (▶ collapsed, ▼ open)
 - Add/remove trades inside each session
 - Edit session-level and trade-level fields inline without typing interruption
-- Hover/focus behavior for session text fields to expand and show full text
 - Rules builder and dynamic session-level rule inputs
-- Habit analytics on Overview
-- Mistake + setup analytics on Mistakes tab
 - Backup tools: export JSON / import JSON / reset to demo
 
 ## Backup format

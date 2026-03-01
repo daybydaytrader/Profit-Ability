@@ -14,17 +14,9 @@ const seed = {
       correctDecisions: "Waited for breakout confirmation",
       rules: { r1: true, r2: "Trending" },
       trades: [
-        { id: "t1", symbol: "TSLA", setup: "ORB", r: 1.6, entry: 240.1, exit: 245.6 },
-        { id: "t2", symbol: "NVDA", setup: "Pullback", r: -1.1, entry: 801.2, exit: 799.0 },
+        { id: "t1", symbol: "TSLA", setup: "ORB", type: "long", size: 10, entry: 240.1, exit: 245.6, stop: 2.5 },
+        { id: "t2", symbol: "NVDA", setup: "Pullback", type: "short", size: 4, entry: 801.2, exit: 799.0, stop: 1.2 },
       ],
-    },
-    {
-      id: "s2",
-      date: "2026-02-25",
-      mistakes: "",
-      correctDecisions: "Cut loser quickly",
-      rules: { r1: true, r2: "Trending" },
-      trades: [{ id: "t3", symbol: "AAPL", setup: "VWAP Reclaim", r: 1.1, entry: 187.4, exit: 190.1 }],
     },
   ],
 };
@@ -39,6 +31,25 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function toNum(v) {
+  if (typeof v === "number") return v;
+  const cleaned = String(v ?? "").replace(/[^0-9.-]/g, "");
+  return Number(cleaned || 0);
+}
+
+function normalizeTrade(t) {
+  return {
+    id: t.id || `t${Date.now()}`,
+    symbol: t.symbol || "",
+    setup: t.setup || "",
+    type: t.type === "short" ? "short" : "long",
+    size: Number(t.size || 0),
+    entry: toNum(t.entry),
+    exit: toNum(t.exit),
+    stop: toNum(t.stop),
+  };
+}
+
 function normalizeSession(session) {
   return {
     id: session.id || `s${Date.now()}`,
@@ -47,24 +58,12 @@ function normalizeSession(session) {
     correctDecisions: String(session.correctDecisions || "").slice(0, SESSION_TEXT_MAX),
     rules: session.rules || {},
     collapsed: Boolean(session.collapsed),
-    trades: Array.isArray(session.trades)
-      ? session.trades.map((t) => ({
-          id: t.id || `t${Date.now()}`,
-          symbol: t.symbol || "",
-          setup: t.setup || "",
-          r: Number(t.r || 0),
-          entry: Number(t.entry || 0),
-          exit: Number(t.exit || 0),
-        }))
-      : [],
+    trades: Array.isArray(session.trades) ? session.trades.map(normalizeTrade) : [],
   };
 }
 
 function migrateLegacyToSessions(raw) {
-  if (Array.isArray(raw.sessions) && raw.sessions.length && raw.sessions[0].trades) {
-    return raw;
-  }
-
+  if (Array.isArray(raw.sessions) && raw.sessions.length && raw.sessions[0].trades) return raw;
   if (Array.isArray(raw.sessions) && Array.isArray(raw.trades)) {
     const grouped = raw.sessions.map((s) => ({
       id: s.id,
@@ -74,11 +73,19 @@ function migrateLegacyToSessions(raw) {
       rules: s.rules || {},
       trades: raw.trades
         .filter((t) => t.sessionId === s.id)
-        .map((t) => ({ id: t.id, symbol: t.symbol, setup: t.setup, r: t.r, entry: t.entry || 0, exit: t.exit || 0 })),
+        .map((t) => ({
+          id: t.id,
+          symbol: t.symbol,
+          setup: t.setup,
+          type: t.type || "long",
+          size: t.size || 0,
+          entry: t.entry || 0,
+          exit: t.exit || 0,
+          stop: t.stop || 0,
+        })),
     }));
     return { rules: raw.rules || [], sessions: grouped };
   }
-
   return raw;
 }
 
@@ -90,22 +97,15 @@ function loadState() {
   } catch {
     parsed = structuredClone(seed);
   }
-
   parsed = migrateLegacyToSessions(parsed);
-
   const rules = Array.isArray(parsed.rules) ? parsed.rules : [];
   const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeSession) : [];
-
-  return {
-    rules,
-    sessions: sessions.length ? sessions : structuredClone(seed.sessions),
-  };
+  return { rules, sessions: sessions.length ? sessions : structuredClone(seed.sessions) };
 }
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  const stamp = new Date().toLocaleString();
-  document.getElementById("saveStatus").textContent = `Saved locally • ${stamp}`;
+  document.getElementById("saveStatus").textContent = `Saved locally • ${new Date().toLocaleString()}`;
 }
 
 function switchTab(name) {
@@ -113,8 +113,18 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.id === `tab-${name}`));
 }
 
+function calcR(trade) {
+  const stop = Math.abs(toNum(trade.stop));
+  if (!stop) return 0;
+  const ratio = Math.abs(toNum(trade.exit) - toNum(trade.entry)) / stop;
+  return Math.ceil(ratio * 10) / 10;
+}
+
 function calcTradePnl(trade) {
-  return Number(trade.exit || 0) - Number(trade.entry || 0);
+  const entry = toNum(trade.entry);
+  const exit = toNum(trade.exit);
+  const multiplier = Number(trade.size || 0) * 2;
+  return multiplier * (exit - entry);
 }
 
 function getAllTrades() {
@@ -122,11 +132,15 @@ function getAllTrades() {
 }
 
 function getSessionNet(session) {
-  return (session.trades || []).reduce((acc, t) => acc + calcTradePnl(t), 0);
+  return session.trades.reduce((acc, t) => acc + calcTradePnl(t), 0);
 }
 
-function money(v) {
-  return `$${Number(v).toFixed(2)}`;
+function getSessionRuleAdherence(session) {
+  const checks = state.rules.filter((r) => r.type === "checkbox");
+  if (!checks.length) return null;
+  const values = checks.map((r) => session.rules?.[r.id]).filter((v) => typeof v === "boolean");
+  if (!values.length) return 0;
+  return (values.filter(Boolean).length / values.length) * 100;
 }
 
 function metrics() {
@@ -138,7 +152,6 @@ function metrics() {
   const checkboxRules = state.rules.filter((r) => r.type === "checkbox");
   let totalChecks = 0;
   let passedChecks = 0;
-
   state.sessions.forEach((s) => {
     checkboxRules.forEach((r) => {
       if (typeof s.rules?.[r.id] === "boolean") {
@@ -157,11 +170,10 @@ function drawEquity() {
   const ctx = canvas.getContext("2d");
   const w = canvas.width;
   const h = canvas.height;
-
   ctx.clearRect(0, 0, w, h);
-  const trades = getAllTrades();
+
   const points = [10000];
-  trades.forEach((t) => points.push(points.at(-1) + calcTradePnl(t)));
+  getAllTrades().forEach((t) => points.push(points.at(-1) + calcTradePnl(t)));
 
   const min = Math.min(...points);
   const max = Math.max(...points);
@@ -179,32 +191,29 @@ function drawEquity() {
   ctx.strokeStyle = "#60a5fa";
   ctx.lineWidth = 2;
   ctx.beginPath();
-
   points.forEach((v, i) => {
     const x = 36 + (i * (w - 50)) / Math.max(points.length - 1, 1);
     const y = h - 20 - ((v - min) / range) * (h - 40);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
-
   ctx.stroke();
 }
 
 function renderOverview() {
   const m = metrics();
   const cards = [
-    ["Net P/L", money(m.net), m.net >= 0],
+    ["Net P/L", `$${m.net.toFixed(2)}`, m.net >= 0],
     ["Sessions", `${m.sessions}`, true],
     ["Trades", `${m.trades}`, true],
     ["Win Rate", `${m.winRate.toFixed(1)}%`, m.winRate >= 50],
     ["Rule Discipline", `${m.ruleScore.toFixed(1)}%`, m.ruleScore >= 80],
   ];
-
   document.getElementById("scorecards").innerHTML = cards
     .map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`)
     .join("");
 
-  const habitScores = state.rules
+  const habits = state.rules
     .map((rule) => {
       if (rule.type !== "checkbox") return null;
       const vals = state.sessions.map((s) => s.rules?.[rule.id]).filter((x) => typeof x === "boolean");
@@ -214,15 +223,11 @@ function renderOverview() {
     .filter(Boolean)
     .sort((a, b) => b.pct - a.pct);
 
-  const best = habitScores.slice(0, 3);
-  const worst = [...habitScores].reverse().slice(0, 3);
-
-  document.getElementById("bestHabits").innerHTML = best.length
-    ? best.map((h) => `<li>${h.name} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
+  document.getElementById("bestHabits").innerHTML = habits.length
+    ? habits.slice(0, 3).map((h) => `<li>${escapeHtml(h.name)} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
     : "<li>No checkbox rules yet.</li>";
-
-  document.getElementById("worstHabits").innerHTML = worst.length
-    ? worst.map((h) => `<li>${h.name} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
+  document.getElementById("worstHabits").innerHTML = habits.length
+    ? [...habits].reverse().slice(0, 3).map((h) => `<li>${escapeHtml(h.name)} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
     : "<li>No checkbox rules yet.</li>";
 
   drawEquity();
@@ -233,16 +238,16 @@ function renderSessionRules(session) {
     .map((rule) => {
       const val = session.rules?.[rule.id];
       if (rule.type === "checkbox") {
-        return `<label>${rule.name}<input data-session-rule="${rule.id}" data-session-id="${session.id}" type="checkbox" ${val ? "checked" : ""}/></label>`;
+        const active = Boolean(val);
+        return `<button type="button" class="rule-pill ${active ? "is-true" : "is-false"}" data-rule-toggle="${rule.id}" data-session-id="${session.id}">${escapeHtml(rule.name)}</button>`;
       }
       if (rule.type === "select") {
-        return `<label>${rule.name}<select data-session-rule="${rule.id}" data-session-id="${session.id}"><option value="">—</option>${rule.options.map((o) => `<option ${val === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select></label>`;
+        return `<label>${escapeHtml(rule.name)}<select data-session-rule="${rule.id}" data-session-id="${session.id}"><option value="">—</option>${rule.options.map((o) => `<option ${val === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select></label>`;
       }
-      const safeVal = escapeHtml(val || "");
       return `
-        <label class="field-with-counter">${rule.name}
-          <textarea class="session-input session-expandable" data-expandable data-session-rule="${rule.id}" data-session-id="${session.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${safeVal}</textarea>
-          <span class="char-counter" data-counter-for="${rule.id}" data-counter-scope="rule">0/${SESSION_TEXT_MAX}</span>
+        <label class="field-with-counter">${escapeHtml(rule.name)}
+          <textarea class="session-input session-expandable" data-expandable data-session-rule="${rule.id}" data-session-id="${session.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(val || "")}</textarea>
+          <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
         </label>
       `;
     })
@@ -250,32 +255,36 @@ function renderSessionRules(session) {
 }
 
 function renderSessionTrades(session) {
-  const rows = (session.trades || [])
+  const rows = session.trades
     .map((t) => {
       const pnl = calcTradePnl(t);
+      const r = calcR(t);
       return `
       <tr>
         <td><input data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}" value="${escapeHtml(t.symbol || "")}"/></td>
         <td><input data-trade-k="setup" data-session-id="${session.id}" data-trade-id="${t.id}" value="${escapeHtml(t.setup || "")}"/></td>
-        <td><input data-trade-k="r" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.1" value="${t.r ?? 0}"/></td>
-        <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${t.entry ?? 0}"/></td>
-        <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${t.exit ?? 0}"/></td>
-        <td data-trade-pnl="${t.id}" class="${pnl >= 0 ? "good" : "bad"}">${money(pnl)}</td>
+        <td><select data-trade-k="type" data-session-id="${session.id}" data-trade-id="${t.id}"><option value="long" ${t.type === "long" ? "selected" : ""}>long</option><option value="short" ${t.type === "short" ? "selected" : ""}>short</option></select></td>
+        <td><input data-trade-k="size" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="1" value="${t.size ?? 0}"/></td>
+        <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" value="${toNum(t.entry)}"/></td>
+        <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" value="${toNum(t.exit)}"/></td>
+        <td><input data-trade-k="stop" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${toNum(t.stop)}"/></td>
+        <td data-trade-r="${t.id}">${r.toFixed(1)}</td>
+        <td data-trade-pnl="${t.id}" class="${pnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}</td>
         <td><button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button></td>
-      </tr>
-    `;
+      </tr>`;
     })
     .join("");
 
-  return rows || `<tr><td colspan="7" class="muted">No trades yet.</td></tr>`;
+  return rows || `<tr><td colspan="10" class="muted">No trades yet.</td></tr>`;
 }
 
 function renderJournal() {
   const html = state.sessions
     .map((s) => {
       const net = getSessionNet(s);
+      const adherence = getSessionRuleAdherence(s);
       return `
-      <article class="session-card" data-session-card="${s.id}">
+      <article class="session-card">
         <div class="session-top">
           <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
           <label>Date
@@ -283,43 +292,31 @@ function renderJournal() {
           </label>
           <label class="field-with-counter">Mistakes
             <textarea class="session-input session-expandable" data-expandable data-session-k="mistakes" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.mistakes || "")}</textarea>
-            <span class="char-counter" data-counter-for="mistakes" data-session-id="${s.id}">0/${SESSION_TEXT_MAX}</span>
+            <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
           </label>
           <div class="net-result-wrap">
             <div class="muted">Net</div>
-            <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">${money(net)}</div>
+            <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">$${net.toFixed(2)}</div>
+            <div class="adherence-badge ${adherence !== null && adherence >= 75 ? "good" : "bad"}">Rule Adherence: ${adherence === null ? "N/A" : `${adherence.toFixed(0)}%`}</div>
           </div>
           <label class="field-with-counter">Correct Decisions
             <textarea class="session-input session-expandable" data-expandable data-session-k="correctDecisions" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.correctDecisions || "")}</textarea>
-            <span class="char-counter" data-counter-for="correctDecisions" data-session-id="${s.id}">0/${SESSION_TEXT_MAX}</span>
+            <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
           </label>
           <div class="session-top-actions">
             <button data-del-session="${s.id}">Delete Session</button>
           </div>
         </div>
+
         <div class="session-rules">${renderSessionRules(s) || '<span class="muted">No rules yet.</span>'}</div>
+
         ${
           s.collapsed
             ? ""
-            : `
-          <div class="session-actions">
-            <span class="pill">${s.trades.length} trades</span>
-            <button data-add-trade="${s.id}">+ Add Trade</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Symbol</th><th>Setup</th><th>R</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Actions</th></tr>
-              </thead>
-              <tbody>
-                ${renderSessionTrades(s)}
-              </tbody>
-            </table>
-          </div>
-        `
+            : `<div class="session-actions"><span class="pill">${s.trades.length} trades</span><button data-add-trade="${s.id}">+ Add Trade</button></div>
+               <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Exit</th><th>Stop</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
         }
-      </article>
-    `;
+      </article>`;
     })
     .join("");
 
@@ -330,26 +327,21 @@ function renderJournal() {
 function renderRules() {
   document.getElementById("ruleList").innerHTML =
     state.rules
-      .map(
-        (r) =>
-          `<li><strong>${escapeHtml(r.name)}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.map(escapeHtml).join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`
-      )
+      .map((r) => `<li><strong>${escapeHtml(r.name)}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.map(escapeHtml).join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`)
       .join("") || "<li>No rules yet.</li>";
 }
 
 function renderMistakes() {
-  const mistakeMap = new Map();
+  const map = new Map();
   state.sessions.forEach((s) => {
     (s.mistakes || "")
       .split(",")
       .map((x) => x.trim())
       .filter(Boolean)
-      .forEach((m) => {
-        mistakeMap.set(m, (mistakeMap.get(m) || 0) + 1);
-      });
+      .forEach((m) => map.set(m, (map.get(m) || 0) + 1));
   });
 
-  const top = [...mistakeMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const top = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   document.getElementById("mistakeList").innerHTML = top.length
     ? top.map(([m, n]) => `<li>${escapeHtml(m)} (${n})</li>`).join("")
     : "<li>No mistakes logged yet.</li>";
@@ -357,16 +349,16 @@ function renderMistakes() {
   const bySetup = new Map();
   getAllTrades().forEach((t) => {
     if (!bySetup.has(t.setup)) bySetup.set(t.setup, []);
-    bySetup.get(t.setup).push(Number(t.r || 0));
+    bySetup.get(t.setup).push(calcR(t));
   });
 
-  const worstSetups = [...bySetup.entries()]
+  const worst = [...bySetup.entries()]
     .map(([setup, vals]) => ({ setup, avg: vals.reduce((a, v) => a + v, 0) / vals.length }))
     .sort((a, b) => a.avg - b.avg)
     .slice(0, 5);
 
-  document.getElementById("worstSetupList").innerHTML = worstSetups.length
-    ? worstSetups.map((s) => `<li>${escapeHtml(s.setup)}: ${s.avg.toFixed(2)}R</li>`).join("")
+  document.getElementById("worstSetupList").innerHTML = worst.length
+    ? worst.map((s) => `<li>${escapeHtml(s.setup)}: ${s.avg.toFixed(2)}R</li>`).join("")
     : "<li>No setup data yet.</li>";
 }
 
@@ -395,7 +387,7 @@ function addSession() {
 function addTradeToSession(sessionId) {
   const session = state.sessions.find((s) => s.id === sessionId);
   if (!session) return;
-  session.trades.unshift({ id: `t${Date.now()}`, symbol: "", setup: "", r: 0, entry: 0, exit: 0 });
+  session.trades.unshift({ id: `t${Date.now()}`, symbol: "", setup: "", type: "long", size: 0, entry: 0, exit: 0, stop: 1 });
   rerender();
 }
 
@@ -406,16 +398,14 @@ function addRule() {
   if (!name) return;
 
   const options = type === "select" ? optionsRaw.split(",").map((x) => x.trim()).filter(Boolean) : [];
-  const newRule = { id: `r${Date.now()}`, name, type, options };
-  state.rules.push(newRule);
-
+  state.rules.push({ id: `r${Date.now()}`, name, type, options });
   document.getElementById("ruleName").value = "";
   document.getElementById("ruleOptions").value = "";
   rerender();
 }
 
 function exportBackup() {
-  const payload = { version: 4, exportedAt: new Date().toISOString(), data: state };
+  const payload = { version: 6, exportedAt: new Date().toISOString(), data: state };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -434,7 +424,6 @@ function importBackupFile(file) {
       const imported = parsed?.data || parsed;
       const migrated = migrateLegacyToSessions(imported);
       if (!Array.isArray(migrated?.sessions) || !Array.isArray(migrated?.rules)) throw new Error("Invalid backup format.");
-
       state.rules = migrated.rules;
       state.sessions = migrated.sessions.map(normalizeSession);
       rerender();
@@ -456,23 +445,16 @@ function updateSessionField(target) {
   if (!session) return;
 
   if (target.dataset.sessionK) {
-    if (["mistakes", "correctDecisions"].includes(target.dataset.sessionK)) {
-      session[target.dataset.sessionK] = String(target.value).slice(0, SESSION_TEXT_MAX);
-    } else {
-      session[target.dataset.sessionK] = target.value;
-    }
+    const key = target.dataset.sessionK;
+    session[key] = ["mistakes", "correctDecisions"].includes(key)
+      ? String(target.value).slice(0, SESSION_TEXT_MAX)
+      : target.value;
   }
 
   if (target.dataset.sessionRule) {
     const rid = target.dataset.sessionRule;
-    const inputType = target.type;
-    if (inputType === "checkbox") {
-      session.rules[rid] = target.checked;
-    } else if (target.tagName === "TEXTAREA") {
-      session.rules[rid] = String(target.value).slice(0, SESSION_TEXT_MAX);
-    } else {
-      session.rules[rid] = target.value;
-    }
+    if (target.tagName === "TEXTAREA") session.rules[rid] = String(target.value).slice(0, SESSION_TEXT_MAX);
+    else session.rules[rid] = target.value;
   }
 }
 
@@ -484,18 +466,16 @@ function updateTradeField(target) {
 
   const key = target.dataset.tradeK;
   if (!key) return null;
-  trade[key] = ["r", "entry", "exit"].includes(key) ? Number(target.value || 0) : target.value;
+
+  if (["size", "entry", "exit", "stop"].includes(key)) trade[key] = toNum(target.value);
+  else trade[key] = target.value;
+
   return { session, trade };
 }
 
 function updateAllCounters() {
   document.querySelectorAll("textarea[maxlength]").forEach((el) => {
-    const key = el.dataset.sessionK || el.dataset.sessionRule;
-    const sessionId = el.dataset.sessionId;
-    const selector = el.dataset.sessionK
-      ? `.char-counter[data-counter-for="${key}"][data-session-id="${sessionId}"]`
-      : `.char-counter[data-counter-for="${key}"][data-counter-scope="rule"]`;
-    const counter = el.closest("label")?.querySelector(".char-counter") || document.querySelector(selector);
+    const counter = el.closest("label")?.querySelector(".char-counter");
     if (counter) counter.textContent = `${el.value.length}/${SESSION_TEXT_MAX}`;
   });
 }
@@ -506,20 +486,25 @@ function updateTradeComputedUI(sessionId, tradeId) {
   const trade = session.trades.find((t) => t.id === tradeId);
   if (!trade) return;
 
+  const pnl = calcTradePnl(trade);
+  const r = calcR(trade);
+
   const pnlCell = document.querySelector(`[data-trade-pnl="${tradeId}"]`);
   if (pnlCell) {
-    const pnl = calcTradePnl(trade);
-    pnlCell.textContent = money(pnl);
+    pnlCell.textContent = `$${pnl.toFixed(2)}`;
     pnlCell.classList.toggle("good", pnl >= 0);
     pnlCell.classList.toggle("bad", pnl < 0);
   }
 
-  const sessionNetEl = document.querySelector(`[data-session-net="${sessionId}"]`);
-  if (sessionNetEl) {
-    const sessionNet = getSessionNet(session);
-    sessionNetEl.textContent = money(sessionNet);
-    sessionNetEl.classList.toggle("good", sessionNet >= 0);
-    sessionNetEl.classList.toggle("bad", sessionNet < 0);
+  const rCell = document.querySelector(`[data-trade-r="${tradeId}"]`);
+  if (rCell) rCell.textContent = r.toFixed(1);
+
+  const net = getSessionNet(session);
+  const netEl = document.querySelector(`[data-session-net="${sessionId}"]`);
+  if (netEl) {
+    netEl.textContent = `$${net.toFixed(2)}`;
+    netEl.classList.toggle("good", net >= 0);
+    netEl.classList.toggle("bad", net < 0);
   }
 }
 
@@ -584,6 +569,15 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
     const session = state.sessions.find((s) => s.id === toggleSessionId);
     if (!session) return;
     session.collapsed = !session.collapsed;
+    rerender();
+    return;
+  }
+
+  const ruleToggleId = e.target.dataset.ruleToggle;
+  if (ruleToggleId) {
+    const session = state.sessions.find((s) => s.id === e.target.dataset.sessionId);
+    if (!session) return;
+    session.rules[ruleToggleId] = !Boolean(session.rules[ruleToggleId]);
     rerender();
     return;
   }
