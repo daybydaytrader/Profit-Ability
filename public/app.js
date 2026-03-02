@@ -491,11 +491,28 @@ function syncEditorControls() {
   if (!menu || !stage || !frame || !canvas || !textOverlay || !modeSelect || !lineColor || !textColor) return;
   menu.hidden = !(editor.visible && editor.expanded);
   frame.classList.toggle("expanded", editor.expanded);
+  stage.classList.toggle("line-mode", editor.visible && editor.expanded && editor.mode === "line");
   canvas.classList.toggle("editable", editor.visible && editor.expanded && editor.mode === "line");
   textOverlay.classList.toggle("editable", editor.visible && editor.expanded && editor.mode !== "line");
   modeSelect.value = editor.mode;
   lineColor.value = editor.lineColor;
   textColor.value = editor.textColor;
+}
+
+function getBaseImageDrawRect(canvas) {
+  const base = uiState.imageEditor.baseImage;
+  if (!canvas || !base?.naturalWidth || !base?.naturalHeight) {
+    return { x: 0, y: 0, width: canvas?.width || 1, height: canvas?.height || 1 };
+  }
+  const scale = Math.min(canvas.width / base.naturalWidth, canvas.height / base.naturalHeight);
+  const width = base.naturalWidth * scale;
+  const height = base.naturalHeight * scale;
+  return {
+    x: (canvas.width - width) / 2,
+    y: (canvas.height - height) / 2,
+    width,
+    height,
+  };
 }
 
 function resizeEditCanvas() {
@@ -512,12 +529,13 @@ function renderTextOverlay() {
   const { textOverlay, canvas } = getImageEditorElements();
   if (!textOverlay || !canvas) return;
   const editor = uiState.imageEditor;
+  const imageRect = getBaseImageDrawRect(canvas);
   textOverlay.innerHTML = editor.texts
     .map((txt) => {
-      const left = txt.x * canvas.width;
-      const top = txt.y * canvas.height;
-      const width = Math.max(80, (txt.w || 0.2) * canvas.width);
-      const height = Math.max(36, (txt.h || 0.12) * canvas.height);
+      const left = imageRect.x + txt.x * imageRect.width;
+      const top = imageRect.y + txt.y * imageRect.height;
+      const width = Math.max(80, (txt.w || 0.2) * imageRect.width);
+      const height = Math.max(36, (txt.h || 0.12) * imageRect.height);
       const selected = editor.selectedTextId === txt.id ? " selected" : "";
       return `<div class="text-box${selected}" data-text-id="${txt.id}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px;">
         <div class="text-box-handle" title="Drag"></div>
@@ -534,13 +552,9 @@ function redrawEditCanvas() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const base = uiState.imageEditor.baseImage;
+  const imageRect = getBaseImageDrawRect(canvas);
   if (base?.naturalWidth && base?.naturalHeight) {
-    const scale = Math.min(canvas.width / base.naturalWidth, canvas.height / base.naturalHeight);
-    const drawW = base.naturalWidth * scale;
-    const drawH = base.naturalHeight * scale;
-    const dx = (canvas.width - drawW) / 2;
-    const dy = (canvas.height - drawH) / 2;
-    ctx.drawImage(base, dx, dy, drawW, drawH);
+    ctx.drawImage(base, imageRect.x, imageRect.y, imageRect.width, imageRect.height);
   }
 
   uiState.imageEditor.lines.forEach((line) => {
@@ -551,8 +565,8 @@ function redrawEditCanvas() {
     ctx.lineCap = "round";
     ctx.beginPath();
     line.points.forEach((pt, index) => {
-      const x = pt.x * canvas.width;
-      const y = pt.y * canvas.height;
+      const x = imageRect.x + pt.x * imageRect.width;
+      const y = imageRect.y + pt.y * imageRect.height;
       if (index === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
@@ -565,8 +579,8 @@ function redrawEditCanvas() {
     ctx.lineWidth = 2;
     ctx.beginPath();
     current.points.forEach((pt, index) => {
-      const x = pt.x * canvas.width;
-      const y = pt.y * canvas.height;
+      const x = imageRect.x + pt.x * imageRect.width;
+      const y = imageRect.y + pt.y * imageRect.height;
       if (index === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
@@ -594,9 +608,22 @@ function editorPointFromEvent(e) {
   const { canvas } = getImageEditorElements();
   if (!canvas) return null;
   const rect = canvas.getBoundingClientRect();
+  const imageRect = getBaseImageDrawRect(canvas);
+  const imageLeft = rect.left + (imageRect.x / canvas.width) * rect.width;
+  const imageTop = rect.top + (imageRect.y / canvas.height) * rect.height;
+  const imageWidthPx = (imageRect.width / canvas.width) * rect.width;
+  const imageHeightPx = (imageRect.height / canvas.height) * rect.height;
+  if (
+    e.clientX < imageLeft ||
+    e.clientX > imageLeft + imageWidthPx ||
+    e.clientY < imageTop ||
+    e.clientY > imageTop + imageHeightPx
+  ) {
+    return null;
+  }
   return {
-    x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-    y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    x: Math.min(1, Math.max(0, (e.clientX - imageLeft) / imageWidthPx)),
+    y: Math.min(1, Math.max(0, (e.clientY - imageTop) / imageHeightPx)),
   };
 }
 
@@ -605,12 +632,13 @@ function updateTextFromNode(box) {
   const txt = uiState.imageEditor.texts.find((item) => item.id === id);
   if (!txt) return;
   const { canvas } = getImageEditorElements();
+  const imageRect = getBaseImageDrawRect(canvas);
   const area = box.querySelector("textarea");
   if (!canvas || !area) return;
   txt.text = area.value;
   txt.color = area.style.color || txt.color;
-  txt.w = Math.max(80, box.offsetWidth) / canvas.width;
-  txt.h = Math.max(36, box.offsetHeight) / canvas.height;
+  txt.w = Math.max(80, box.offsetWidth) / imageRect.width;
+  txt.h = Math.max(36, box.offsetHeight) / imageRect.height;
 }
 
 function undoEditor() {
@@ -1025,6 +1053,7 @@ document.getElementById("linkModal").addEventListener("click", (e) => {
 
 document.getElementById("editModeSelect").addEventListener("change", (e) => {
   uiState.imageEditor.mode = e.target.value;
+  syncEditorControls();
 });
 document.getElementById("lineColorInput").addEventListener("input", (e) => {
   uiState.imageEditor.lineColor = e.target.value;
@@ -1165,13 +1194,20 @@ textOverlay.addEventListener("pointerdown", (e) => {
 textOverlay.addEventListener("pointermove", (e) => {
   if (!draggingText) return;
   const { canvas } = getImageEditorElements();
+  const imageRect = getBaseImageDrawRect(canvas);
   const txt = uiState.imageEditor.texts.find((item) => item.id === draggingText.id);
   if (!txt || !canvas) return;
   const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left - draggingText.offsetX) / rect.width;
-  const y = (e.clientY - rect.top - draggingText.offsetY) / rect.height;
-  txt.x = Math.min(0.95, Math.max(0, x));
-  txt.y = Math.min(0.95, Math.max(0, y));
+  const imageLeft = rect.left + (imageRect.x / canvas.width) * rect.width;
+  const imageTop = rect.top + (imageRect.y / canvas.height) * rect.height;
+  const imageWidthPx = (imageRect.width / canvas.width) * rect.width;
+  const imageHeightPx = (imageRect.height / canvas.height) * rect.height;
+  const textW = Math.max(80, (txt.w || 0.2) * imageRect.width);
+  const textH = Math.max(36, (txt.h || 0.12) * imageRect.height);
+  const x = (e.clientX - imageLeft - draggingText.offsetX) / imageWidthPx;
+  const y = (e.clientY - imageTop - draggingText.offsetY) / imageHeightPx;
+  txt.x = Math.min(1 - textW / imageRect.width, Math.max(0, x));
+  txt.y = Math.min(1 - textH / imageRect.height, Math.max(0, y));
   renderTextOverlay();
 });
 

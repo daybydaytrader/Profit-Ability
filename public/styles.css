@@ -302,7 +302,7 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 }
 
 .image-modal-content.image-modal-editor-shell {
-  width: min(78vw, 960px);
+  width: min(86vw, 1120px);
 }
 .image-modal-content.image-modal-editor-shell.expanded {
   width: min(94vw, 1280px);
@@ -316,8 +316,8 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 .image-stage {
   position: relative;
   width: 100%;
-  height: min(58vh, 500px);
-  min-height: 280px;
+  height: min(66vh, 620px);
+  min-height: 340px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -325,6 +325,9 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 }
 .image-modal-content.image-modal-editor-shell.expanded .image-stage {
   height: min(72vh, 680px);
+}
+.image-modal-content.image-modal-editor-shell.expanded .image-stage.line-mode {
+  cursor: crosshair;
 }
 .image-stage > img {
   display: none;
