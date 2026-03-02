@@ -234,7 +234,18 @@
         <div id="accountGroupCards" class="playbook-grid"></div>
         <div class="link-modal-actions">
           <button id="openGroupBuilderFromPickerBtn" type="button">Add Group</button>
+          <button id="saveAccountGroupSelectionBtn" type="button">Save</button>
         </div>
+      </div>
+    </div>
+
+    <div id="accountEntityModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-account-entity-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-account-entity-modal aria-label="Close details">✕</button>
+        <h3 id="accountEntityTitle">Details</h3>
+        <div id="accountEntityBody"></div>
+        <div class="link-modal-actions" id="accountEntityActions"></div>
       </div>
     </div>
 

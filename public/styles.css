@@ -703,6 +703,11 @@ button { cursor: pointer; font-weight: 600; }
   min-height: 180px;
 }
 
+.selected-card {
+  border-color: #8ea2ff;
+  box-shadow: 0 0 0 1px #8ea2ff, 0 12px 28px rgba(0,0,0,.35);
+}
+
 @media (max-width: 980px) {
   .group-builder-transfer {
     grid-template-columns: 1fr;
