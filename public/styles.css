@@ -144,7 +144,7 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
   border-radius: 12px;
   padding: 12px;
 }
-.session-top { display: grid; gap: 12px; grid-template-columns: auto 132px 170px 88px minmax(180px,2fr) auto auto minmax(180px,2fr) auto; align-items: start; }
+.session-top { display: grid; gap: 12px; grid-template-columns: auto 132px minmax(190px, 210px) 88px minmax(180px,2fr) auto auto minmax(180px,2fr) auto; align-items: start; }
 .session-top label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
 .session-rules { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
 .session-rules label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
@@ -157,6 +157,9 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 .session-link-wrap {
   display: grid;
   align-content: start;
+  width: 88px;
+  min-width: 88px;
+  justify-self: start;
 }
 .session-link-card {
   display: grid;
