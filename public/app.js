@@ -15,6 +15,7 @@ const POINT_VALUE_BY_SYMBOL = {
 
 const seed = {
   accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE }],
+  groups: [],
   playbook: [{ id: "pb1", title: "ORB", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }, { id: "pb2", title: "Pullback", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }],
   rules: [
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
@@ -218,6 +219,16 @@ function normalizeAccount(account) {
   };
 }
 
+function normalizeGroup(group) {
+  const name = String(group?.name || "").trim();
+  const multiplier = Number(group?.multiplier ?? group?.size);
+  return {
+    id: group?.id || `grp${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
+    name: name || "Group",
+    multiplier: Number.isFinite(multiplier) && multiplier > 0 ? Math.round(multiplier) : 1,
+  };
+}
+
 function normalizeSession(session) {
   return {
     id: session.id || `s${Date.now()}`,
@@ -289,12 +300,15 @@ function loadState() {
   const legacyStart = Number(parsed.accountStart);
   const legacyAccount = { id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE };
   const accounts = (Array.isArray(parsed.accounts) && parsed.accounts.length ? parsed.accounts : [legacyAccount]).map(normalizeAccount);
+  const groups = (Array.isArray(parsed.groups) ? parsed.groups : []).map(normalizeGroup);
   const accountIds = new Set(accounts.map((a) => a.id));
+  const groupIds = new Set(groups.map((g) => g.id));
   sessions.forEach((session) => {
-    if (!accountIds.has(session.accountId)) session.accountId = accounts[0].id;
+    if (!accountIds.has(session.accountId) && !groupIds.has(session.accountId)) session.accountId = accounts[0].id;
   });
   return {
     accounts,
+    groups,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
     sessions: sessions.length ? sessions : structuredClone(seed.sessions),
@@ -315,6 +329,22 @@ function switchTab(name) {
 
 function getAccountById(accountId) {
   return state.accounts.find((account) => account.id === accountId) || state.accounts[0];
+}
+
+function getGroupById(groupId) {
+  return state.groups.find((group) => group.id === groupId) || null;
+}
+
+function getSessionMultiplier(session) {
+  const group = getGroupById(session.accountId);
+  return group ? Math.max(1, Number(group.multiplier || 1)) : 1;
+}
+
+function accountTargetLabel(id) {
+  const group = getGroupById(id);
+  if (group) return `${group.name} (Group ×${group.multiplier})`;
+  const account = getAccountById(id);
+  return account?.id === id ? account.name : "Main Account";
 }
 
 function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
@@ -369,6 +399,10 @@ function getSessionNet(session) {
   return session.trades.reduce((acc, t) => acc + calcTradePnl(t), 0);
 }
 
+function getSessionTotalNet(session) {
+  return getSessionNet(session) * getSessionMultiplier(session);
+}
+
 function getSessionRuleAdherence(session) {
   const checks = state.rules.filter((r) => r.type === "checkbox");
   if (!checks.length) return null;
@@ -378,7 +412,7 @@ function getSessionRuleAdherence(session) {
 
 function metrics() {
   const allTrades = getAllTrades();
-  const net = allTrades.reduce((a, t) => a + calcTradePnl(t), 0);
+  const net = state.sessions.reduce((acc, session) => acc + getSessionTotalNet(session), 0);
   const wins = allTrades.filter((t) => calcTradePnl(t) > 0).length;
   const winRate = allTrades.length ? (wins / allTrades.length) * 100 : 0;
 
@@ -400,10 +434,16 @@ function drawEquity() {
     from: uiState.filters.overviewFrom,
     to: uiState.filters.overviewTo,
   }).sort((a, b) => a.date.localeCompare(b.date));
-  const account = uiState.filters.overviewAccountId === "all" ? null : getAccountById(uiState.filters.overviewAccountId);
-  const start = account ? account.startingBalance : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
+  const selectedId = uiState.filters.overviewAccountId;
+  const group = selectedId === "all" ? null : getGroupById(selectedId);
+  const account = selectedId === "all" || group ? null : getAccountById(selectedId);
+  const start = group
+    ? (state.accounts[0]?.startingBalance || DEFAULT_STARTING_BALANCE) * group.multiplier
+    : account
+      ? account.startingBalance
+      : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
   const points = [start];
-  sessions.forEach((session) => points.push(points.at(-1) + getSessionNet(session)));
+  sessions.forEach((session) => points.push(points.at(-1) + getSessionTotalNet(session)));
   const labels = ["Start", ...sessions.map((session) => session.date)];
   const min = Math.min(...points);
   const max = Math.max(...points);
@@ -498,7 +538,13 @@ function renderOverview() {
 
 
 function accountOptions(selected = "") {
-  return state.accounts.map((account) => `<option value="${account.id}" ${selected === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`).join("");
+  const accountOptionsHtml = state.accounts
+    .map((account) => `<option value="${account.id}" ${selected === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`)
+    .join("");
+  const groupOptionsHtml = state.groups
+    .map((group) => `<option value="${group.id}" ${selected === group.id ? "selected" : ""}>${escapeHtml(group.name)} (Group ×${group.multiplier})</option>`)
+    .join("");
+  return `${accountOptionsHtml}${groupOptionsHtml}`;
 }
 
 function renderFilterSelects() {
@@ -512,8 +558,19 @@ function renderFilterSelects() {
 
 function renderAccounts() {
   const list = document.getElementById("accountsList");
-  if (!list) return;
-  list.innerHTML = state.accounts.map((account) => `<div class="account-row"><div><strong>${escapeHtml(account.name)}</strong><div class="muted small">Start: $${formatWithThousands(account.startingBalance, 0)}</div></div><button data-remove-account="${account.id}" ${state.accounts.length <= 1 ? "disabled" : ""}>Remove</button></div>`).join("");
+  const groupsList = document.getElementById("groupsList");
+  if (list) {
+    list.innerHTML = state.accounts
+      .map((account) => `<div class="account-row"><div><strong>${escapeHtml(account.name)}</strong><div class="muted small">Start: $${formatWithThousands(account.startingBalance, 0)}</div></div><button data-remove-account="${account.id}" ${state.accounts.length <= 1 ? "disabled" : ""}>Remove</button></div>`)
+      .join("");
+  }
+  if (groupsList) {
+    groupsList.innerHTML = state.groups.length
+      ? state.groups
+          .map((group) => `<div class="account-row"><div><strong>${escapeHtml(group.name)}</strong><div class="muted small">Multiplier: ×${group.multiplier}</div></div><button data-remove-group="${group.id}">Remove</button></div>`)
+          .join("")
+      : '<div class="muted small">No groups yet.</div>';
+  }
 }
 
 function renderSessionRules(session) {
@@ -542,6 +599,8 @@ function renderSessionTrades(session) {
   const rows = session.trades
     .map((t) => {
       const pnl = calcTradePnl(t);
+      const multiplier = getSessionMultiplier(session);
+      const totalPnl = pnl * multiplier;
       const r = calcR(t);
       return `
       <tr>
@@ -567,7 +626,7 @@ function renderSessionTrades(session) {
         <td><input data-trade-k="stop" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${toNum(t.stop)}"/></td>
         <td data-trade-duration="${t.id}">${calcTradeDuration(t)}</td>
         <td data-trade-r="${t.id}">${r.toFixed(1)}</td>
-        <td data-trade-pnl="${t.id}" class="${pnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}</td>
+        <td data-trade-pnl="${t.id}" class="${pnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">Group: $${totalPnl.toFixed(2)}</div>` : ""}</td>
         <td><button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button></td>
       </tr>`;
     })
@@ -617,6 +676,8 @@ function renderJournal() {
   const html = filteredSessions
     .map((s) => {
       const net = getSessionNet(s);
+      const multiplier = getSessionMultiplier(s);
+      const totalNet = net * multiplier;
       const adherence = getSessionRuleAdherence(s);
       return `
       <article class="session-card">
@@ -641,6 +702,7 @@ function renderJournal() {
           <div class="net-result-wrap">
             <div class="muted">Net</div>
             <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">$${net.toFixed(2)}</div>
+            ${multiplier > 1 ? `<div class="muted small">${escapeHtml(accountTargetLabel(s.accountId))}: $${totalNet.toFixed(2)}</div>` : ""}
             <div class="adherence-badge ${adherence !== null && adherence >= 75 ? "good" : "bad"}">Rule Adherence: ${adherence === null ? "N/A" : `${adherence.toFixed(0)}%`}</div>
           </div>
           <label class="field-with-counter">Good Decisions
@@ -1160,11 +1222,22 @@ function addSetup() {
 
 function addAccount() {
   const name = document.getElementById("accountNameInput").value.trim();
-  const startingBalance = Number(document.getElementById("accountBalanceInput").value);
+  const startingBalanceRaw = document.getElementById("accountBalanceInput").value;
+  const startingBalance = Number(startingBalanceRaw || DEFAULT_STARTING_BALANCE);
   if (!name || !Number.isFinite(startingBalance) || startingBalance < 0) return;
   state.accounts.push({ id: `acc${Date.now()}`, name, startingBalance });
   document.getElementById("accountNameInput").value = "";
   document.getElementById("accountBalanceInput").value = "";
+  rerender();
+}
+
+function addGroup() {
+  const name = document.getElementById("groupNameInput").value.trim();
+  const multiplier = Number(document.getElementById("groupSizeInput").value || 1);
+  if (!name || !Number.isFinite(multiplier) || multiplier < 1) return;
+  state.groups.push({ id: `grp${Date.now()}`, name, multiplier: Math.round(multiplier) });
+  document.getElementById("groupNameInput").value = "";
+  document.getElementById("groupSizeInput").value = "";
   rerender();
 }
 
@@ -1221,6 +1294,7 @@ function importBackupFile(file) {
       if (!Array.isArray(migrated?.sessions) || !Array.isArray(migrated?.rules)) throw new Error("Invalid backup format.");
       const legacyStart = Number(migrated.accountStart);
       state.accounts = (Array.isArray(migrated.accounts) && migrated.accounts.length ? migrated.accounts : [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE }]).map(normalizeAccount);
+      state.groups = (Array.isArray(migrated.groups) ? migrated.groups : []).map(normalizeGroup);
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
@@ -1236,6 +1310,7 @@ function importBackupFile(file) {
 
 function resetToDemo() {
   state.accounts = structuredClone(seed.accounts);
+  state.groups = structuredClone(seed.groups);
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions);
@@ -1308,7 +1383,8 @@ function updateTradeComputedUI(sessionId, tradeId) {
 
   const pnlCell = document.querySelector(`[data-trade-pnl="${tradeId}"]`);
   if (pnlCell) {
-    pnlCell.textContent = `$${pnl.toFixed(2)}`;
+    const multiplier = getSessionMultiplier(session);
+    pnlCell.innerHTML = `$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">Group: $${(pnl * multiplier).toFixed(2)}</div>` : ""}`;
     pnlCell.classList.toggle("good", pnl >= 0);
     pnlCell.classList.toggle("bad", pnl < 0);
   }
@@ -1357,6 +1433,17 @@ document.getElementById("accountsList").addEventListener("click", (e) => {
   if (uiState.filters.journalAccountId === accountId) uiState.filters.journalAccountId = "all";
   rerender();
 });
+document.getElementById("groupsList").addEventListener("click", (e) => {
+  const groupId = e.target.dataset.removeGroup;
+  if (!groupId) return;
+  state.groups = state.groups.filter((group) => group.id !== groupId);
+  state.sessions.forEach((session) => {
+    if (session.accountId === groupId) session.accountId = state.accounts[0]?.id || DEFAULT_ACCOUNT_ID;
+  });
+  if (uiState.filters.overviewAccountId === groupId) uiState.filters.overviewAccountId = "all";
+  if (uiState.filters.journalAccountId === groupId) uiState.filters.journalAccountId = "all";
+  rerender();
+});
 
 document.getElementById("customSymbolList").addEventListener("click", (e) => {
   const delSymbol = e.target.dataset.delSymbol;
@@ -1369,6 +1456,7 @@ document.getElementById("importBtn").addEventListener("click", () => document.ge
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
 document.getElementById("resetBtn").addEventListener("click", resetToDemo);
 document.getElementById("addAccountBtn").addEventListener("click", addAccount);
+document.getElementById("addGroupBtn").addEventListener("click", addGroup);
 
 [["equityAccountFilter","overviewAccountId"],["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalAccountFilter","journalAccountId"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]].forEach(([id,key]) => {
   const el = document.getElementById(id);

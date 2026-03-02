@@ -111,7 +111,8 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 .journal-controls {
   display: flex;
   gap: 10px;
-  align-items: flex-start;
+  align-items: end;
+  flex-wrap: wrap;
   margin-bottom: 10px;
 }
 .symbol-list {
@@ -143,7 +144,7 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
   border-radius: 12px;
   padding: 12px;
 }
-.session-top { display: grid; gap: 12px; grid-template-columns: auto 138px 88px minmax(180px,2fr) auto auto minmax(180px,2fr) auto; align-items: start; }
+.session-top { display: grid; gap: 12px; grid-template-columns: auto 132px 170px 88px minmax(180px,2fr) auto auto minmax(180px,2fr) auto; align-items: start; }
 .session-top label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
 .session-rules { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
 .session-rules label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
