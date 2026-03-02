@@ -46,7 +46,7 @@ function normalizeCustomSymbol(symbol) {
 }
 
 function getAllSymbolOptions() {
-  const custom = (state.customSymbols || []).map((item) => item.ticker);
+  const custom = (state?.customSymbols || []).map((item) => item.ticker);
   return [...new Set([...SYMBOL_OPTIONS, ...custom])];
 }
 
@@ -58,7 +58,7 @@ function getBasePriceStep(symbol) {
 
 function getSymbolConfig(symbol) {
   const normalized = String(symbol || "").trim().toUpperCase();
-  const custom = (state.customSymbols || []).find((item) => item.ticker === normalized);
+  const custom = (state?.customSymbols || []).find((item) => item.ticker === normalized);
   if (custom) return { tickSize: custom.tickSize, pointValue: custom.tickValue / custom.tickSize };
   const pointValue = POINT_VALUE_BY_SYMBOL[normalized] || 2;
   return { tickSize: getBasePriceStep(normalized), pointValue };
@@ -653,6 +653,16 @@ function renderPlaybook() {
       .join("") || '<p class="muted">No setups yet.</p>';
 }
 
+
+function renderPlaybookModalShot(setup) {
+  const shotBtn = document.getElementById("playbookModalShotBtn");
+  if (!shotBtn) return;
+  shotBtn.classList.toggle("session-shot-empty", !setup?.perfectSetup);
+  shotBtn.innerHTML = setup?.perfectSetup
+    ? `<img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/><span class="shot-corner-arrow">↗</span>`
+    : "Add screenshot";
+}
+
 function renderMistakes() {
   const map = new Map();
   state.sessions.forEach((s) => {
@@ -992,6 +1002,7 @@ function applyScreenshotToTarget(target, file) {
       if (!setup) return;
       setup.perfectSetup = src;
       setup.perfectSetupEdits = { lines: [], texts: [], history: [], future: [] };
+      if (uiState.activePlaybookSetupId === target.id) renderPlaybookModalShot(setup);
     }
     rerender();
     if (uiState.activeImageTarget?.id === target.id && uiState.activeImageTarget?.type === target.type) openImageModal(src, target);
@@ -1671,13 +1682,7 @@ document.getElementById("playbookList").addEventListener("click", (e) => {
   uiState.activePlaybookSetupId = cardId;
   document.getElementById("playbookModalTitleInput").value = setup.title;
   document.getElementById("playbookModalConfluencesInput").value = setup.confluences || "";
-  const preview = document.getElementById("playbookModalImage");
-  const shotBtn = document.getElementById("playbookModalShotBtn");
-  preview.src = setup.perfectSetup || "";
-  preview.style.display = setup.perfectSetup ? "block" : "none";
-  shotBtn.classList.toggle("session-shot-empty", !setup.perfectSetup);
-  shotBtn.innerHTML = setup.perfectSetup ? `<img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/><span class="shot-corner-arrow">↗</span>` : "Add screenshot";
-  document.getElementById("playbookModalEmpty").hidden = Boolean(setup.perfectSetup);
+  renderPlaybookModalShot(setup);
   document.getElementById("playbookDetailModal").hidden = false;
   document.body.style.overflow = "hidden";
 });
