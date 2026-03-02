@@ -104,6 +104,36 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
 .session-list-column { display: grid; gap: 12px; margin-top: 10px; }
+
+.journal-controls {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.symbol-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.symbol-list li {
+  font-size: 0.85rem;
+}
+.symbol-modal-content {
+  width: min(92vw, 520px);
+  display: grid;
+  gap: 10px;
+}
+.symbol-modal-content h3 {
+  margin: 2px 0 6px;
+}
+.symbol-modal-content label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
 .session-card {
   background: linear-gradient(180deg, rgba(37, 43, 53, 0.95), rgba(25, 29, 36, 0.95));
   border: 1px solid #3c4352;
