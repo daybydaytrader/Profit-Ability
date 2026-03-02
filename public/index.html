@@ -17,6 +17,7 @@
           <button data-tab="overview" class="active">Overview</button>
           <button data-tab="journal">Journal</button>
           <button data-tab="mistakes">Mistakes</button>
+          <button data-tab="playbook">Playbook</button>
           <button data-tab="rules">Rules</button>
         </nav>
 
@@ -53,6 +54,10 @@
               <h3>Worst Habits</h3>
               <ul id="worstHabits"></ul>
             </div>
+          </div>
+          <div class="panel">
+            <h3>Best Setups</h3>
+            <ul id="bestSetupList"></ul>
           </div>
         </section>
 
@@ -98,11 +103,49 @@
             <ul id="ruleList" class="rule-list"></ul>
           </div>
         </section>
+
+        <section id="tab-playbook" class="tab">
+          <div class="panel">
+            <h2>Playbook</h2>
+            <p class="muted">Define your setups once, then select them for each trade in Journal.</p>
+            <div class="rule-form">
+              <input id="setupName" placeholder="Setup name (e.g. ORB, Pullback, VWAP Reclaim)" />
+              <button id="addSetupBtn">+ Add Setup</button>
+            </div>
+            <div id="playbookList" class="playbook-grid"></div>
+          </div>
+        </section>
       </main>
     </div>
 
 
 
+
+
+
+    <div id="playbookDetailModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-playbook-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-playbook-modal aria-label="Close playbook setup">✕</button>
+        <h3>Edit Playbook Setup</h3>
+        <label>Title
+          <input id="playbookModalTitleInput" type="text" />
+        </label>
+        <label>Confluences
+          <textarea id="playbookModalConfluencesInput" rows="5"></textarea>
+        </label>
+        <label>Perfect Setup</label>
+        <div class="playbook-shot-wrap">
+          <button id="playbookModalShotBtn" type="button" class="session-shot session-shot-empty">Add screenshot</button>
+          <input id="playbookModalShotInput" type="file" accept="image/*" hidden />
+        </div>
+        <img id="playbookModalImage" alt="Perfect setup preview" />
+        <p id="playbookModalEmpty" class="muted">No perfect setup screenshot added yet.</p>
+        <div class="link-modal-actions">
+          <button id="savePlaybookSetupBtn" type="button">Save Setup</button>
+        </div>
+      </div>
+    </div>
 
     <div id="linkModal" class="image-modal" hidden>
       <div class="image-modal-backdrop" data-close-link-modal></div>
