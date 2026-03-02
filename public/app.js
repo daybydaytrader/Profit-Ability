@@ -2,9 +2,19 @@ const STORAGE_KEY = "trading_dashboard_state_v2";
 const SESSION_TEXT_MAX = 300;
 const DEFAULT_STARTING_BALANCE = 50000;
 
+const SYMBOL_OPTIONS = ["NQ", "MNQ", "ES", "MES", "GC", "MGC"];
+const POINT_VALUE_BY_SYMBOL = {
+  NQ: 20,
+  MNQ: 2,
+  ES: 50,
+  MES: 5,
+  GC: 100,
+  MGC: 10,
+};
+
 const seed = {
   accountStart: DEFAULT_STARTING_BALANCE,
-  playbook: ["ORB", "Pullback"],
+  playbook: [{ id: "pb1", title: "ORB", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }, { id: "pb2", title: "Pullback", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }],
   rules: [
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
     { id: "r2", name: "Market condition", type: "select", options: ["Trending", "Choppy", "News-driven"] },
@@ -17,8 +27,8 @@ const seed = {
       correctDecisions: "Waited for breakout confirmation",
       rules: { r1: true, r2: "Trending" },
       trades: [
-        { id: "t1", symbol: "TSLA", entryTime: "09:35", exitTime: "10:02", setup: "ORB", type: "long", size: 10, entry: 240.1, exit: 245.6, stop: 2.5 },
-        { id: "t2", symbol: "NVDA", entryTime: "10:10", exitTime: "10:41", setup: "Pullback", type: "short", size: 4, entry: 801.2, exit: 799.0, stop: 1.2 },
+        { id: "t1", symbol: "MNQ", entryTime: "09:35", exitTime: "10:02", setup: "ORB", type: "long", size: 10, entry: 240.1, exit: 245.6, stop: 2.5 },
+        { id: "t2", symbol: "NQ", entryTime: "10:10", exitTime: "10:41", setup: "Pullback", type: "short", size: 4, entry: 801.2, exit: 799.0, stop: 1.2 },
       ],
     },
   ],
@@ -26,8 +36,9 @@ const seed = {
 
 const state = loadState();
 const uiState = {
-  activeImageSessionId: null,
+  activeImageTarget: null,
   activeLinkSessionId: null,
+  activePlaybookSetupId: null,
   imageEditor: {
     visible: false,
     expanded: false,
@@ -65,17 +76,48 @@ function normalizeTradeTime(value) {
   return match ? raw : "";
 }
 
+function getPriceStep(symbol) {
+  if (["NQ", "MNQ", "ES", "MES"].includes(symbol)) return 0.25;
+  if (["GC", "MGC"].includes(symbol)) return 0.1;
+  return 0.01;
+}
+
+function snapPriceToSymbol(value, symbol) {
+  const step = getPriceStep(symbol);
+  const num = toNum(value);
+  const snapped = Math.round(num / step) * step;
+  return Number(snapped.toFixed(4));
+}
+
+function formatWithThousands(value, decimals = 2) {
+  const fixed = Number(value || 0).toFixed(decimals);
+  const [intPart, fracPart] = fixed.split(".");
+  const signed = intPart.startsWith("-") ? "-" : "";
+  const absInt = signed ? intPart.slice(1) : intPart;
+  const grouped = Number(absInt || 0).toLocaleString("en-US");
+  if (!fracPart) return `${signed}${grouped}`;
+  if (/^0+$/.test(fracPart)) return `${signed}${grouped}`;
+  return `${signed}${grouped}.${fracPart}`;
+}
+
+function formatTradePrice(value, symbol) {
+  const step = getPriceStep(symbol);
+  const decimals = step === 0.25 ? 2 : step === 0.1 ? 1 : 2;
+  return formatWithThousands(snapPriceToSymbol(value, symbol), decimals);
+}
+
 function normalizeTrade(t) {
+  const symbol = String(t.symbol || "MNQ").trim().toUpperCase();
   return {
     id: t.id || `t${Date.now()}`,
-    symbol: t.symbol || "",
+    symbol,
     entryTime: normalizeTradeTime(t.entryTime || t.time),
     exitTime: normalizeTradeTime(t.exitTime),
     setup: t.setup || "",
     type: t.type === "short" ? "short" : "long",
     size: Number(t.size || 0),
-    entry: toNum(t.entry),
-    exit: toNum(t.exit),
+    entry: snapPriceToSymbol(t.entry, symbol),
+    exit: snapPriceToSymbol(t.exit, symbol),
     stop: toNum(t.stop),
   };
 }
@@ -83,8 +125,49 @@ function normalizeTrade(t) {
 function normalizePlaybook(playbook) {
   const seen = new Set();
   return (Array.isArray(playbook) ? playbook : [])
-    .map((setup) => String(setup || "").trim())
-    .filter((setup) => setup && !seen.has(setup) && seen.add(setup));
+    .map((item) => {
+      if (typeof item === "string") {
+        return {
+          id: `pb${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
+          title: item.trim(),
+          confluences: "",
+          perfectSetup: "",
+          perfectSetupEdits: { lines: [], texts: [], history: [], future: [] },
+        };
+      }
+      return {
+        id: item?.id || `pb${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
+        title: String(item?.title || item?.name || "").trim(),
+        confluences: String(item?.confluences || ""),
+        perfectSetup: String(item?.perfectSetup || ""),
+        perfectSetupEdits: {
+          lines: Array.isArray(item?.perfectSetupEdits?.lines) ? item.perfectSetupEdits.lines : [],
+          texts: Array.isArray(item?.perfectSetupEdits?.texts) ? item.perfectSetupEdits.texts : [],
+          history: Array.isArray(item?.perfectSetupEdits?.history) ? item.perfectSetupEdits.history : [],
+          future: Array.isArray(item?.perfectSetupEdits?.future) ? item.perfectSetupEdits.future : [],
+        },
+      };
+    })
+    .filter((setup) => setup.title && !seen.has(setup.title.toLowerCase()) && seen.add(setup.title.toLowerCase()));
+}
+
+function getPlaybookTitles() {
+  return state.playbook.map((setup) => setup.title);
+}
+
+function getImageTargetData(target) {
+  if (!target?.id) return null;
+  if (target.type === "session") {
+    const session = state.sessions.find((item) => item.id === target.id);
+    if (!session) return null;
+    return { screenshot: session.screenshot, edits: session.screenshotEdits || { lines: [], texts: [], history: [], future: [] } };
+  }
+  if (target.type === "playbook") {
+    const setup = state.playbook.find((item) => item.id === target.id);
+    if (!setup) return null;
+    return { screenshot: setup.perfectSetup, edits: setup.perfectSetupEdits || { lines: [], texts: [], history: [], future: [] } };
+  }
+  return null;
 }
 
 function normalizeSession(session) {
@@ -182,27 +265,11 @@ function calcR(trade) {
 function calcTradePnl(trade) {
   const entry = toNum(trade.entry);
   const exit = toNum(trade.exit);
-  const multiplier = Number(trade.size || 0) * 2;
+  const size = Number(trade.size || 0);
+  const symbol = String(trade.symbol || "").trim().toUpperCase();
+  const pointValue = POINT_VALUE_BY_SYMBOL[symbol] || 2;
   const direction = trade.type === "short" ? entry - exit : exit - entry;
-  return multiplier * direction;
-}
-
-function timeToMinutes(value) {
-  const normalized = normalizeTradeTime(value);
-  if (!normalized) return null;
-  const [hours, minutes] = normalized.split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-function calcTradeDuration(trade) {
-  const start = timeToMinutes(trade.entryTime);
-  const end = timeToMinutes(trade.exitTime);
-  if (start === null || end === null || end < start) return "—";
-  const diff = end - start;
-  const hours = Math.floor(diff / 60);
-  const minutes = diff % 60;
-  if (hours) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  return size * pointValue * direction;
 }
 
 function timeToMinutes(value) {
@@ -414,19 +481,24 @@ function renderSessionTrades(session) {
       const r = calcR(t);
       return `
       <tr>
-        <td><input data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}" value="${escapeHtml(t.symbol || "")}"/></td>
+        <td>
+          <select data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}">
+            ${SYMBOL_OPTIONS.map((symbol) => `<option value="${symbol}" ${t.symbol === symbol ? "selected" : ""}>${symbol}</option>`).join("")}
+            ${t.symbol && !SYMBOL_OPTIONS.includes(t.symbol) ? `<option value="${escapeHtml(t.symbol)}" selected>${escapeHtml(t.symbol)} (legacy)</option>` : ""}
+          </select>
+        </td>
         <td>
           <select data-trade-k="setup" data-session-id="${session.id}" data-trade-id="${t.id}">
             <option value="">— Select setup —</option>
-            ${state.playbook.map((setup) => `<option value="${escapeHtml(setup)}" ${t.setup === setup ? "selected" : ""}>${escapeHtml(setup)}</option>`).join("")}
-            ${t.setup && !state.playbook.includes(t.setup) ? `<option value="${escapeHtml(t.setup)}" selected>${escapeHtml(t.setup)} (legacy)</option>` : ""}
+            ${getPlaybookTitles().map((setup) => `<option value="${escapeHtml(setup)}" ${t.setup === setup ? "selected" : ""}>${escapeHtml(setup)}</option>`).join("")}
+            ${t.setup && !getPlaybookTitles().includes(t.setup) ? `<option value="${escapeHtml(t.setup)}" selected>${escapeHtml(t.setup)} (legacy)</option>` : ""}
           </select>
         </td>
         <td><select data-trade-k="type" data-session-id="${session.id}" data-trade-id="${t.id}"><option value="long" ${t.type === "long" ? "selected" : ""}>long</option><option value="short" ${t.type === "short" ? "selected" : ""}>short</option></select></td>
         <td><input data-trade-k="size" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="1" value="${t.size ?? 0}"/></td>
-        <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" value="${toNum(t.entry)}"/></td>
+        <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" value="${formatTradePrice(t.entry, t.symbol)}"/></td>
         <td><input data-trade-k="entryTime" data-session-id="${session.id}" data-trade-id="${t.id}" type="time" value="${normalizeTradeTime(t.entryTime)}"/></td>
-        <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" value="${toNum(t.exit)}"/></td>
+        <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" value="${formatTradePrice(t.exit, t.symbol)}"/></td>
         <td><input data-trade-k="exitTime" data-session-id="${session.id}" data-trade-id="${t.id}" type="time" value="${normalizeTradeTime(t.exitTime)}"/></td>
         <td><input data-trade-k="stop" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${toNum(t.stop)}"/></td>
         <td data-trade-duration="${t.id}">${calcTradeDuration(t)}</td>
@@ -527,8 +599,19 @@ function renderRules() {
 function renderPlaybook() {
   document.getElementById("playbookList").innerHTML =
     state.playbook
-      .map((setup) => `<li><strong>${escapeHtml(setup)}</strong> <button data-remove-setup="${escapeHtml(setup)}">Remove</button></li>`)
-      .join("") || "<li>No setups yet.</li>";
+      .map((setup) => `
+        <article class="playbook-card" data-open-playbook="${setup.id}">
+          <div class="playbook-card-head">
+            <h4>${escapeHtml(setup.title)}</h4>
+            <button type="button" data-remove-setup="${setup.id}">Remove</button>
+          </div>
+          <p class="muted">${setup.confluences ? escapeHtml(setup.confluences.slice(0, 120)) : "No confluences added yet."}</p>
+          <div class="playbook-shot-wrap">
+            ${setup.perfectSetup ? `<button type="button" class="session-shot" data-shot-preview-playbook="${setup.id}"><img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/></button>` : `<div class="session-shot session-shot-empty">No screenshot</div>`}
+          </div>
+        </article>
+      `)
+      .join("") || '<p class="muted">No setups yet.</p>';
 }
 
 function renderMistakes() {
@@ -585,17 +668,28 @@ function pushEditorHistory() {
 }
 
 function persistActiveScreenshotEdits() {
-  const sessionId = uiState.activeImageSessionId;
-  if (!sessionId) return;
-  const session = state.sessions.find((item) => item.id === sessionId);
-  if (!session) return;
+  const target = uiState.activeImageTarget;
+  if (!target?.id) return;
   const editor = uiState.imageEditor;
-  session.screenshotEdits = {
-    lines: structuredClone(editor.lines),
-    texts: structuredClone(editor.texts),
-    history: structuredClone(editor.history),
-    future: structuredClone(editor.future),
-  };
+  if (target.type === "session") {
+    const session = state.sessions.find((item) => item.id === target.id);
+    if (!session) return;
+    session.screenshotEdits = {
+      lines: structuredClone(editor.lines),
+      texts: structuredClone(editor.texts),
+      history: structuredClone(editor.history),
+      future: structuredClone(editor.future),
+    };
+  } else if (target.type === "playbook") {
+    const setup = state.playbook.find((item) => item.id === target.id);
+    if (!setup) return;
+    setup.perfectSetupEdits = {
+      lines: structuredClone(editor.lines),
+      texts: structuredClone(editor.texts),
+      history: structuredClone(editor.history),
+      future: structuredClone(editor.future),
+    };
+  }
   saveState();
 }
 
@@ -806,7 +900,7 @@ function openLinkModal(sessionId) {
 function closeLinkModal() {
   document.getElementById("linkModal").hidden = true;
   uiState.activeLinkSessionId = null;
-  if (document.getElementById("imageModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden) document.body.style.overflow = "";
 }
 
 async function saveLinkFromModal() {
@@ -831,26 +925,35 @@ async function saveLinkFromModal() {
   rerender();
 }
 
-function applyScreenshotToSession(sessionId, file) {
-  const session = state.sessions.find((sessionItem) => sessionItem.id === sessionId);
-  if (!session || !file) return;
+function applyScreenshotToTarget(target, file) {
+  if (!target?.id || !file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    session.screenshot = String(reader.result || "");
-    session.screenshotEdits = { lines: [], texts: [], history: [], future: [] };
+    const src = String(reader.result || "");
+    if (target.type === "session") {
+      const session = state.sessions.find((sessionItem) => sessionItem.id === target.id);
+      if (!session) return;
+      session.screenshot = src;
+      session.screenshotEdits = { lines: [], texts: [], history: [], future: [] };
+    } else if (target.type === "playbook") {
+      const setup = state.playbook.find((item) => item.id === target.id);
+      if (!setup) return;
+      setup.perfectSetup = src;
+      setup.perfectSetupEdits = { lines: [], texts: [], history: [], future: [] };
+    }
     rerender();
-    if (uiState.activeImageSessionId === sessionId) openImageModal(session.screenshot, sessionId);
+    if (uiState.activeImageTarget?.id === target.id && uiState.activeImageTarget?.type === target.type) openImageModal(src, target);
   };
   reader.readAsDataURL(file);
 }
 
-function openImageModal(src, sessionId) {
+function openImageModal(src, target) {
   const modal = document.getElementById("imageModal");
   const img = document.getElementById("imageModalImg");
   const stage = document.getElementById("imageStage");
   if (!modal || !img || !stage) return;
-  const session = state.sessions.find((item) => item.id === sessionId);
-  uiState.activeImageSessionId = sessionId;
+  const targetData = getImageTargetData(target);
+  uiState.activeImageTarget = target;
   uiState.imageEditor.blockUntil = Date.now() + 250;
 
   const base = new Image();
@@ -867,10 +970,10 @@ function openImageModal(src, sessionId) {
   modal.hidden = false;
   document.body.style.overflow = "hidden";
   resetImageEditorState();
-  uiState.imageEditor.lines = structuredClone(session?.screenshotEdits?.lines || []);
-  uiState.imageEditor.texts = structuredClone(session?.screenshotEdits?.texts || []);
-  uiState.imageEditor.history = structuredClone(session?.screenshotEdits?.history || []);
-  uiState.imageEditor.future = structuredClone(session?.screenshotEdits?.future || []);
+  uiState.imageEditor.lines = structuredClone(targetData?.edits?.lines || []);
+  uiState.imageEditor.texts = structuredClone(targetData?.edits?.texts || []);
+  uiState.imageEditor.history = structuredClone(targetData?.edits?.history || []);
+  uiState.imageEditor.future = structuredClone(targetData?.edits?.future || []);
   redrawEditCanvas();
 }
 
@@ -880,7 +983,7 @@ function closeImageModal() {
   const img = document.getElementById("imageModalImg");
   if (!modal || !img) return;
   modal.hidden = true;
-  uiState.activeImageSessionId = null;
+  uiState.activeImageTarget = null;
   img.removeAttribute("src");
   img.style.display = "none";
   const stage = document.getElementById("imageStage");
@@ -888,7 +991,7 @@ function closeImageModal() {
   uiState.imageEditor.blockUntil = 0;
   uiState.imageEditor.baseImage = null;
   resetImageEditorState();
-  if (document.getElementById("linkModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("linkModal").hidden && document.getElementById("playbookDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function rerender() {
@@ -917,7 +1020,7 @@ function addSession() {
 function addTradeToSession(sessionId) {
   const session = state.sessions.find((s) => s.id === sessionId);
   if (!session) return;
-  session.trades.unshift({ id: `t${Date.now()}`, symbol: "", entryTime: "", exitTime: "", setup: "", type: "long", size: 0, entry: 0, exit: 0, stop: 1 });
+  session.trades.unshift({ id: `t${Date.now()}`, symbol: "MNQ", entryTime: "", exitTime: "", setup: "", type: "long", size: 0, entry: 0, exit: 0, stop: 1 });
   rerender();
 }
 
@@ -936,8 +1039,8 @@ function addRule() {
 
 function addSetup() {
   const name = document.getElementById("setupName").value.trim();
-  if (!name || state.playbook.includes(name)) return;
-  state.playbook.push(name);
+  if (!name || state.playbook.some((item) => item.title.toLowerCase() === name.toLowerCase())) return;
+  state.playbook.push({ id: `pb${Date.now()}`, title: name, confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } });
   document.getElementById("setupName").value = "";
   rerender();
 }
@@ -1001,7 +1104,7 @@ function updateSessionField(target) {
   }
 }
 
-function updateTradeField(target) {
+function updateTradeField(target, formatDisplay = false) {
   const session = state.sessions.find((s) => s.id === target.dataset.sessionId);
   if (!session) return null;
   const trade = session.trades.find((t) => t.id === target.dataset.tradeId);
@@ -1010,9 +1113,22 @@ function updateTradeField(target) {
   const key = target.dataset.tradeK;
   if (!key) return null;
 
-  if (["size", "entry", "exit", "stop"].includes(key)) trade[key] = toNum(target.value);
-  else if (["entryTime", "exitTime"].includes(key)) trade[key] = normalizeTradeTime(target.value);
-  else trade[key] = target.value;
+  if (["size", "stop"].includes(key)) trade[key] = toNum(target.value);
+  else if (["entry", "exit"].includes(key)) {
+    trade[key] = snapPriceToSymbol(target.value, trade.symbol);
+    if (formatDisplay) target.value = formatTradePrice(trade[key], trade.symbol);
+  } else if (["entryTime", "exitTime"].includes(key)) trade[key] = normalizeTradeTime(target.value);
+  else if (key === "symbol") {
+    trade[key] = String(target.value || "").trim().toUpperCase();
+    trade.entry = snapPriceToSymbol(trade.entry, trade.symbol);
+    trade.exit = snapPriceToSymbol(trade.exit, trade.symbol);
+    if (formatDisplay) {
+      const entryInput = document.querySelector(`[data-trade-k="entry"][data-trade-id="${trade.id}"]`);
+      const exitInput = document.querySelector(`[data-trade-k="exit"][data-trade-id="${trade.id}"]`);
+      if (entryInput) entryInput.value = formatTradePrice(trade.entry, trade.symbol);
+      if (exitInput) exitInput.value = formatTradePrice(trade.exit, trade.symbol);
+    }
+  } else trade[key] = target.value;
 
   return { session, trade };
 }
@@ -1090,7 +1206,7 @@ document.getElementById("sessionList").addEventListener("input", (e) => {
   }
 
   if (t.dataset.tradeK) {
-    const updated = updateTradeField(t);
+    const updated = updateTradeField(t, false);
     if (updated) updateTradeComputedUI(updated.session.id, updated.trade.id);
     refreshAnalyticsOnly();
   }
@@ -1099,8 +1215,8 @@ document.getElementById("sessionList").addEventListener("input", (e) => {
 
 document.getElementById("modalShotInput").addEventListener("change", (e) => {
   const file = e.target.files?.[0];
-  if (!file || !uiState.activeImageSessionId) return;
-  applyScreenshotToSession(uiState.activeImageSessionId, file);
+  if (!file || !uiState.activeImageTarget?.id) return;
+  applyScreenshotToTarget(uiState.activeImageTarget, file);
   e.target.value = "";
 });
 
@@ -1109,7 +1225,7 @@ document.getElementById("sessionList").addEventListener("change", (e) => {
   if (t.dataset.sessionShotInput) {
     const file = t.files?.[0];
     if (!file) return;
-    applyScreenshotToSession(t.dataset.sessionShotInput, file);
+    applyScreenshotToTarget({ type: "session", id: t.dataset.sessionShotInput }, file);
     t.value = "";
     return;
   }
@@ -1121,7 +1237,7 @@ document.getElementById("sessionList").addEventListener("change", (e) => {
   }
 
   if (t.dataset.tradeK) {
-    const updated = updateTradeField(t);
+    const updated = updateTradeField(t, true);
     if (updated) updateTradeComputedUI(updated.session.id, updated.trade.id);
     refreshAnalyticsOnly();
   }
@@ -1169,7 +1285,7 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
   if (shotPreviewId) {
     const session = state.sessions.find((s) => s.id === shotPreviewId);
     if (!session?.screenshot) return;
-    openImageModal(session.screenshot, shotPreviewId);
+    openImageModal(session.screenshot, { type: "session", id: shotPreviewId });
     return;
   }
 
@@ -1415,6 +1531,8 @@ window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   closeImageModal();
   closeLinkModal();
+  const playbookModal = document.getElementById("playbookDetailModal");
+  if (playbookModal && !playbookModal.hidden) playbookModal.hidden = true;
 });
 
 document.getElementById("ruleList").addEventListener("click", (e) => {
@@ -1428,15 +1546,72 @@ document.getElementById("ruleList").addEventListener("click", (e) => {
 });
 
 document.getElementById("playbookList").addEventListener("click", (e) => {
-  const setup = e.target.dataset.removeSetup;
-  if (!setup) return;
-  state.playbook = state.playbook.filter((item) => item !== setup);
-  state.sessions.forEach((session) => {
-    session.trades.forEach((trade) => {
-      if (trade.setup === setup) trade.setup = "";
+  const removeId = e.target.dataset.removeSetup;
+  if (removeId) {
+    const setup = state.playbook.find((item) => item.id === removeId);
+    const removedTitle = setup?.title || "";
+    state.playbook = state.playbook.filter((item) => item.id !== removeId);
+    state.sessions.forEach((session) => {
+      session.trades.forEach((trade) => {
+        if (trade.setup === removedTitle) trade.setup = "";
+      });
     });
-  });
+    rerender();
+    return;
+  }
+
+  const previewId = e.target.closest("[data-shot-preview-playbook]")?.dataset.shotPreviewPlaybook;
+  if (previewId) {
+    const setup = state.playbook.find((item) => item.id === previewId);
+    if (setup?.perfectSetup) openImageModal(setup.perfectSetup, { type: "playbook", id: previewId });
+    return;
+  }
+
+  const cardId = e.target.closest("[data-open-playbook]")?.dataset.openPlaybook;
+  if (!cardId || e.target.closest("button")) return;
+  const setup = state.playbook.find((item) => item.id === cardId);
+  if (!setup) return;
+  uiState.activePlaybookSetupId = cardId;
+  document.getElementById("playbookModalTitleInput").value = setup.title;
+  document.getElementById("playbookModalConfluencesInput").value = setup.confluences || "";
+  const preview = document.getElementById("playbookModalImage");
+  const shotBtn = document.getElementById("playbookModalShotBtn");
+  preview.src = setup.perfectSetup || "";
+  preview.style.display = setup.perfectSetup ? "block" : "none";
+  shotBtn.classList.toggle("session-shot-empty", !setup.perfectSetup);
+  shotBtn.innerHTML = setup.perfectSetup ? `<img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/><span class="shot-corner-arrow">↗</span>` : "Add screenshot";
+  document.getElementById("playbookModalEmpty").hidden = Boolean(setup.perfectSetup);
+  document.getElementById("playbookDetailModal").hidden = false;
+  document.body.style.overflow = "hidden";
+});
+
+document.getElementById("playbookModalShotBtn").addEventListener("click", () => {
+  if (!uiState.activePlaybookSetupId) return;
+  document.getElementById("playbookModalShotInput").click();
+});
+
+document.getElementById("playbookModalShotInput").addEventListener("change", (e) => {
+  const file = e.target.files?.[0];
+  if (!file || !uiState.activePlaybookSetupId) return;
+  applyScreenshotToTarget({ type: "playbook", id: uiState.activePlaybookSetupId }, file);
+  e.target.value = "";
+});
+
+document.getElementById("savePlaybookSetupBtn").addEventListener("click", () => {
+  if (!uiState.activePlaybookSetupId) return;
+  const setup = state.playbook.find((item) => item.id === uiState.activePlaybookSetupId);
+  if (!setup) return;
+  setup.title = document.getElementById("playbookModalTitleInput").value.trim() || setup.title;
+  setup.confluences = document.getElementById("playbookModalConfluencesInput").value;
   rerender();
+});
+
+document.getElementById("playbookDetailModal").addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-playbook-modal]")) {
+    document.getElementById("playbookDetailModal").hidden = true;
+    uiState.activePlaybookSetupId = null;
+    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden) document.body.style.overflow = "";
+  }
 });
 
 rerender();
