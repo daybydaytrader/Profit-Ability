@@ -79,6 +79,12 @@ function normalizeSession(session) {
     correctDecisions: String(session.correctDecisions || "").slice(0, SESSION_TEXT_MAX),
     rules: session.rules || {},
     screenshot: typeof session.screenshot === "string" ? session.screenshot : "",
+    screenshotEdits: {
+      lines: Array.isArray(session.screenshotEdits?.lines) ? session.screenshotEdits.lines : [],
+      texts: Array.isArray(session.screenshotEdits?.texts) ? session.screenshotEdits.texts : [],
+      history: Array.isArray(session.screenshotEdits?.history) ? session.screenshotEdits.history : [],
+      future: Array.isArray(session.screenshotEdits?.future) ? session.screenshotEdits.future : [],
+    },
     videoLink: {
       url: String(session.videoLink?.url || ""),
       title: String(session.videoLink?.title || ""),
@@ -476,6 +482,22 @@ function pushEditorHistory() {
   });
   if (editor.history.length > 100) editor.history.shift();
   editor.future = [];
+  persistActiveScreenshotEdits();
+}
+
+function persistActiveScreenshotEdits() {
+  const sessionId = uiState.activeImageSessionId;
+  if (!sessionId) return;
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  const editor = uiState.imageEditor;
+  session.screenshotEdits = {
+    lines: structuredClone(editor.lines),
+    texts: structuredClone(editor.texts),
+    history: structuredClone(editor.history),
+    future: structuredClone(editor.future),
+  };
+  saveState();
 }
 
 function syncEditorControls() {
@@ -647,6 +669,7 @@ function updateTextFromNode(box) {
   txt.color = area.style.color || txt.color;
   txt.w = Math.max(80, box.offsetWidth) / imageRect.width;
   txt.h = Math.max(36, box.offsetHeight) / imageRect.height;
+  persistActiveScreenshotEdits();
 }
 
 function undoEditor() {
@@ -656,6 +679,7 @@ function undoEditor() {
   editor.future.push({ lines: structuredClone(editor.lines), texts: structuredClone(editor.texts) });
   editor.lines = prev.lines;
   editor.texts = prev.texts;
+  persistActiveScreenshotEdits();
   redrawEditCanvas();
 }
 
@@ -666,6 +690,7 @@ function redoEditor() {
   editor.history.push({ lines: structuredClone(editor.lines), texts: structuredClone(editor.texts) });
   editor.lines = next.lines;
   editor.texts = next.texts;
+  persistActiveScreenshotEdits();
   redrawEditCanvas();
 }
 
@@ -713,6 +738,7 @@ function applyScreenshotToSession(sessionId, file) {
   const reader = new FileReader();
   reader.onload = () => {
     session.screenshot = String(reader.result || "");
+    session.screenshotEdits = { lines: [], texts: [], history: [], future: [] };
     rerender();
     if (uiState.activeImageSessionId === sessionId) openImageModal(session.screenshot, sessionId);
   };
@@ -724,6 +750,7 @@ function openImageModal(src, sessionId) {
   const img = document.getElementById("imageModalImg");
   const stage = document.getElementById("imageStage");
   if (!modal || !img || !stage) return;
+  const session = state.sessions.find((item) => item.id === sessionId);
   uiState.activeImageSessionId = sessionId;
   uiState.imageEditor.blockUntil = Date.now() + 250;
 
@@ -741,6 +768,11 @@ function openImageModal(src, sessionId) {
   modal.hidden = false;
   document.body.style.overflow = "hidden";
   resetImageEditorState();
+  uiState.imageEditor.lines = structuredClone(session?.screenshotEdits?.lines || []);
+  uiState.imageEditor.texts = structuredClone(session?.screenshotEdits?.texts || []);
+  uiState.imageEditor.history = structuredClone(session?.screenshotEdits?.history || []);
+  uiState.imageEditor.future = structuredClone(session?.screenshotEdits?.future || []);
+  redrawEditCanvas();
 }
 
 
@@ -1075,17 +1107,20 @@ document.getElementById("redoEditBtn").addEventListener("click", redoEditor);
 document.getElementById("clearLinesBtn").addEventListener("click", () => {
   pushEditorHistory();
   uiState.imageEditor.lines = [];
+  persistActiveScreenshotEdits();
   redrawEditCanvas();
 });
 document.getElementById("clearTextBtn").addEventListener("click", () => {
   pushEditorHistory();
   uiState.imageEditor.texts = [];
+  persistActiveScreenshotEdits();
   redrawEditCanvas();
 });
 document.getElementById("clearAllEditsBtn").addEventListener("click", () => {
   pushEditorHistory();
   uiState.imageEditor.lines = [];
   uiState.imageEditor.texts = [];
+  persistActiveScreenshotEdits();
   redrawEditCanvas();
 });
 
@@ -1117,6 +1152,7 @@ document.getElementById("imageStage").addEventListener("click", (e) => {
       color: editor.textColor,
     });
     editor.selectedTextId = editor.texts[editor.texts.length - 1].id;
+    persistActiveScreenshotEdits();
     redrawEditCanvas();
     const last = document.querySelector('.text-box:last-child textarea');
     if (last) last.focus();
@@ -1161,6 +1197,7 @@ editCanvas.addEventListener("pointerup", (e) => {
   editCanvas.releasePointerCapture(e.pointerId);
   if (editor.drawingLine.points.length > 1) editor.lines.push(editor.drawingLine);
   editor.drawingLine = null;
+  persistActiveScreenshotEdits();
   redrawEditCanvas();
 });
 
@@ -1221,6 +1258,7 @@ textOverlay.addEventListener("pointerup", (e) => {
   if (box) box.classList.remove("dragging");
   if (textOverlay.hasPointerCapture(e.pointerId)) textOverlay.releasePointerCapture(e.pointerId);
   draggingText = null;
+  persistActiveScreenshotEdits();
 });
 
 textOverlay.addEventListener("input", (e) => {
