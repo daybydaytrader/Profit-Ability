@@ -1362,6 +1362,10 @@ function saveGroupFromBuilder() {
   rerender();
 }
 
+function addGroup() {
+  openAccountModal("group");
+}
+
 function setCustomSymbolStatus(message) {
   const status = document.getElementById("customSymbolStatus");
   if (status) status.textContent = message;
