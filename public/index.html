@@ -15,6 +15,7 @@
 
         <nav id="navTabs" class="nav-tabs">
           <button data-tab="overview" class="active">Overview</button>
+          <button data-tab="accounts">Accounts</button>
           <button data-tab="journal">Journal</button>
           <button data-tab="mistakes">Mistakes</button>
           <button data-tab="playbook">Playbook</button>
@@ -36,14 +37,22 @@
           <div class="panel">
             <h2>Overview</h2>
             <p class="muted">Focus on consistency and your recurring habits.</p>
-            <label class="account-input-wrap">Initial account equity
-              <input id="startingBalanceInput" type="number" min="0" step="100" placeholder="50000" />
-            </label>
             <div id="scorecards" class="cards"></div>
           </div>
           <div class="panel">
             <h3>Equity Curve</h3>
-            <canvas id="equityChart" width="980" height="260"></canvas>
+            <div class="chart-filters">
+              <label>Account
+                <select id="equityAccountFilter"></select>
+              </label>
+              <label>From
+                <input id="equityDateFrom" type="date" />
+              </label>
+              <label>To
+                <input id="equityDateTo" type="date" />
+              </label>
+            </div>
+            <div id="equityChart" class="equity-chart"></div>
           </div>
           <div class="grid2">
             <div class="panel">
@@ -61,12 +70,37 @@
           </div>
         </section>
 
+        <section id="tab-accounts" class="tab">
+          <div class="panel">
+            <h2>Accounts</h2>
+            <div class="rule-form">
+              <button id="addAccountBtn">+ Add Account</button>
+            </div>
+            <div id="accountsList" class="account-list"></div>
+            <h3>Account Groups</h3>
+            <p class="muted small">Use groups for copy trading. Group total PnL multiplies by accounts count.</p>
+            <div class="rule-form">
+              <button id="addGroupBtn">+ Add Group</button>
+            </div>
+            <div id="groupsList" class="account-list"></div>
+          </div>
+        </section>
+
         <section id="tab-journal" class="tab">
           <div class="panel">
             <h2>Journal</h2>
             <div class="journal-controls">
               <button id="addSessionBtn">+ Add Session</button>
               <button id="openCustomSymbolModalBtn" type="button">Add Symbol</button>
+              <label>Account
+                <select id="journalAccountFilter"></select>
+              </label>
+              <label>From
+                <input id="journalDateFrom" type="date" />
+              </label>
+              <label>To
+                <input id="journalDateTo" type="date" />
+              </label>
             </div>
             <div id="customSymbolModal" class="image-modal" hidden>
               <div class="image-modal-backdrop" data-close-symbol-modal></div>
@@ -133,7 +167,6 @@
             <h2>Playbook</h2>
             <p class="muted">Define your setups once, then select them for each trade in Journal.</p>
             <div class="rule-form">
-              <input id="setupName" placeholder="Setup name (e.g. ORB, Pullback, VWAP Reclaim)" />
               <button id="addSetupBtn">+ Add Setup</button>
             </div>
             <div id="playbookList" class="playbook-grid"></div>
@@ -165,6 +198,79 @@
         </div>
         <div class="link-modal-actions">
           <button id="savePlaybookSetupBtn" type="button">Save Setup</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="accountDetailModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-account-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-account-modal aria-label="Close account modal">✕</button>
+        <h3>Add Account</h3>
+        <label>Account name
+          <input id="accountModalNameInput" type="text" placeholder="e.g. Apex 50k" />
+        </label>
+        <label>Starting equity
+          <input id="accountModalBalanceInput" type="number" min="0" step="100" placeholder="50000" />
+        </label>
+        <label>Max drawdown
+          <input id="accountModalDrawdownInput" type="number" min="0" step="100" placeholder="2500" />
+        </label>
+        <div class="link-modal-actions account-modal-group-actions">
+          <button id="openAccountGroupPickerBtn" type="button">Add to group</button>
+          <span id="accountModalGroupPreview" class="muted small">No group selected</span>
+        </div>
+        <div class="link-modal-actions">
+          <button id="saveAccountBtn" type="button">Save Account</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="accountGroupPickerModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-account-group-picker-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-account-group-picker-modal aria-label="Close add to group modal">✕</button>
+        <h3>Add to Group</h3>
+        <div id="accountGroupCards" class="playbook-grid"></div>
+        <div class="link-modal-actions">
+          <button id="openGroupBuilderFromPickerBtn" type="button">Add Group</button>
+          <button id="saveAccountGroupSelectionBtn" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="accountEntityModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-account-entity-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-account-entity-modal aria-label="Close details">✕</button>
+        <h3 id="accountEntityTitle">Details</h3>
+        <div id="accountEntityBody"></div>
+        <div class="link-modal-actions" id="accountEntityActions"></div>
+      </div>
+    </div>
+
+    <div id="groupBuilderModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-group-builder-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-group-builder-modal aria-label="Close add group modal">✕</button>
+        <h3>Add Group</h3>
+        <label>Name
+          <input id="groupBuilderNameInput" type="text" placeholder="e.g. Eval Batch A" />
+        </label>
+        <div class="group-builder-transfer">
+          <label>Available accounts (not in a group)
+            <select id="groupBuilderAvailable" multiple size="8"></select>
+          </label>
+          <div class="group-transfer-buttons">
+            <button id="groupBuilderAddBtn" type="button">→</button>
+            <button id="groupBuilderRemoveBtn" type="button">←</button>
+          </div>
+          <label>Accounts in this group
+            <select id="groupBuilderSelected" multiple size="8"></select>
+          </label>
+        </div>
+        <div class="link-modal-actions">
+          <button id="saveGroupBuilderBtn" type="button">Save Group</button>
         </div>
       </div>
     </div>
