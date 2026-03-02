@@ -1,6 +1,7 @@
-const STORAGE_KEY = "trading_dashboard_state_v2";
+const STORAGE_KEY = "trading_dashboard_state_v3";
 const SESSION_TEXT_MAX = 300;
 const DEFAULT_STARTING_BALANCE = 50000;
+const DEFAULT_ACCOUNT_ID = "acc1";
 
 const SYMBOL_OPTIONS = ["NQ", "MNQ", "ES", "MES", "GC", "MGC"];
 const POINT_VALUE_BY_SYMBOL = {
@@ -13,7 +14,7 @@ const POINT_VALUE_BY_SYMBOL = {
 };
 
 const seed = {
-  accountStart: DEFAULT_STARTING_BALANCE,
+  accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE }],
   playbook: [{ id: "pb1", title: "ORB", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }, { id: "pb2", title: "Pullback", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }],
   rules: [
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
@@ -26,6 +27,7 @@ const seed = {
       mistakes: "late entry",
       correctDecisions: "Waited for breakout confirmation",
       rules: { r1: true, r2: "Trending" },
+      accountId: DEFAULT_ACCOUNT_ID,
       trades: [
         { id: "t1", symbol: "MNQ", entryTime: "09:35", exitTime: "10:02", setup: "ORB", type: "long", size: 10, entry: 240.1, exit: 245.6, stop: 2.5 },
         { id: "t2", symbol: "NQ", entryTime: "10:10", exitTime: "10:41", setup: "Pullback", type: "short", size: 4, entry: 801.2, exit: 799.0, stop: 1.2 },
@@ -69,6 +71,14 @@ const uiState = {
   activeImageTarget: null,
   activeLinkSessionId: null,
   activePlaybookSetupId: null,
+  filters: {
+    overviewAccountId: "all",
+    overviewFrom: "",
+    overviewTo: "",
+    journalAccountId: "all",
+    journalFrom: "",
+    journalTo: "",
+  },
   imageEditor: {
     visible: false,
     expanded: false,
@@ -198,6 +208,16 @@ function getImageTargetData(target) {
   return null;
 }
 
+function normalizeAccount(account) {
+  const name = String(account?.name || "").trim();
+  const startingBalance = Number(account?.startingBalance);
+  return {
+    id: account?.id || `acc${Date.now()}${Math.random().toString(16).slice(2, 6)}` ,
+    name: name || "Account",
+    startingBalance: Number.isFinite(startingBalance) && startingBalance >= 0 ? startingBalance : DEFAULT_STARTING_BALANCE,
+  };
+}
+
 function normalizeSession(session) {
   return {
     id: session.id || `s${Date.now()}`,
@@ -205,6 +225,7 @@ function normalizeSession(session) {
     mistakes: String(session.mistakes || "").slice(0, SESSION_TEXT_MAX),
     correctDecisions: String(session.correctDecisions || "").slice(0, SESSION_TEXT_MAX),
     rules: session.rules || {},
+    accountId: String(session.accountId || DEFAULT_ACCOUNT_ID),
     screenshot: typeof session.screenshot === "string" ? session.screenshot : "",
     screenshotEdits: {
       lines: Array.isArray(session.screenshotEdits?.lines) ? session.screenshotEdits.lines : [],
@@ -264,10 +285,16 @@ function loadState() {
   const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeSession) : [];
   const inferredSetups = sessions.flatMap((session) => session.trades.map((trade) => String(trade.setup || "").trim())).filter(Boolean);
   const playbook = normalizePlaybook(parsed.playbook?.length ? parsed.playbook : inferredSetups);
-  const accountStart = Number(parsed.accountStart);
   const customSymbols = Array.isArray(parsed.customSymbols) ? parsed.customSymbols.map(normalizeCustomSymbol).filter(Boolean) : [];
+  const legacyStart = Number(parsed.accountStart);
+  const legacyAccount = { id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE };
+  const accounts = (Array.isArray(parsed.accounts) && parsed.accounts.length ? parsed.accounts : [legacyAccount]).map(normalizeAccount);
+  const accountIds = new Set(accounts.map((a) => a.id));
+  sessions.forEach((session) => {
+    if (!accountIds.has(session.accountId)) session.accountId = accounts[0].id;
+  });
   return {
-    accountStart: Number.isFinite(accountStart) && accountStart >= 0 ? accountStart : DEFAULT_STARTING_BALANCE,
+    accounts,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
     sessions: sessions.length ? sessions : structuredClone(seed.sessions),
@@ -283,6 +310,20 @@ function saveState() {
 function switchTab(name) {
   document.querySelectorAll(".nav-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.id === `tab-${name}`));
+}
+
+
+function getAccountById(accountId) {
+  return state.accounts.find((account) => account.id === accountId) || state.accounts[0];
+}
+
+function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
+  return state.sessions.filter((session) => {
+    if (accountId !== "all" && session.accountId !== accountId) return false;
+    if (from && session.date < from) return false;
+    if (to && session.date > to) return false;
+    return true;
+  });
 }
 
 function calcR(trade) {
@@ -352,81 +393,52 @@ function metrics() {
 }
 
 function drawEquity() {
-  const canvas = document.getElementById("equityChart");
-  const ctx = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+  const root = document.getElementById("equityChart");
+  if (!root) return;
+  const sessions = getFilteredSessions({
+    accountId: uiState.filters.overviewAccountId,
+    from: uiState.filters.overviewFrom,
+    to: uiState.filters.overviewTo,
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  const account = uiState.filters.overviewAccountId === "all" ? null : getAccountById(uiState.filters.overviewAccountId);
+  const start = account ? account.startingBalance : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
+  const points = [start];
+  sessions.forEach((session) => points.push(points.at(-1) + getSessionNet(session)));
+  const labels = ["Start", ...sessions.map((session) => session.date)];
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = Math.max(1, max - min);
 
-  const sortedSessions = [...state.sessions].sort((a, b) => {
-    const da = new Date(a.date || 0).getTime();
-    const db = new Date(b.date || 0).getTime();
-    return da - db;
-  });
-
-  const labels = ["Start", ...sortedSessions.map((s) => s.date || "-")];
-  const points = [toNum(state.accountStart) || DEFAULT_STARTING_BALANCE];
-  sortedSessions.forEach((session) => points.push(points.at(-1) + getSessionNet(session)));
-
-  const left = 58;
-  const right = 16;
+  const left = 64;
+  const right = 18;
   const top = 16;
-  const bottom = 38;
+  const bottom = 42;
+  const w = 1000;
+  const h = 260;
   const chartW = w - left - right;
   const chartH = h - top - bottom;
 
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-
-  ctx.strokeStyle = "rgba(217, 221, 228, 0.24)";
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 4; i += 1) {
-    const y = top + i * (chartH / 3);
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(w - right, y);
-    ctx.stroke();
-
-    const val = max - (i * range) / 3;
-    ctx.fillStyle = "#b6bbc6";
-    ctx.font = "12px Inter, system-ui, sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(`$${Math.round(val).toLocaleString()}`, left - 6, y + 4);
-  }
-
-  ctx.strokeStyle = "#d9dde4";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  points.forEach((v, i) => {
+  const pointRows = points.map((value, i) => {
     const x = left + (i * chartW) / Math.max(points.length - 1, 1);
-    const y = top + ((max - v) / range) * chartH;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    const y = top + ((max - value) / range) * chartH;
+    return { x, y, value };
   });
-  ctx.stroke();
+  const path = pointRows.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
 
-  const xTickIndexes = points.length <= 6 ? [...points.keys()] : [0, ...Array.from({ length: 4 }, (_, idx) => Math.round(((idx + 1) * (points.length - 1)) / 5)), points.length - 1];
-  const uniqueIndexes = [...new Set(xTickIndexes)];
+  const yGrid = Array.from({ length: 4 }, (_, i) => {
+    const y = top + i * (chartH / 3);
+    const val = max - (i * range) / 3;
+    return `<line x1="${left}" y1="${y}" x2="${w - right}" y2="${y}" stroke="rgba(217,221,228,0.22)"/><text x="${left - 8}" y="${y + 4}" text-anchor="end" fill="#b6bbc6" font-size="11">$${Math.round(val).toLocaleString()}</text>`;
+  }).join("");
 
-  ctx.fillStyle = "#b6bbc6";
-  ctx.textAlign = "center";
-  uniqueIndexes.forEach((idx) => {
-    const x = left + (idx * chartW) / Math.max(points.length - 1, 1);
-    const label = labels[idx] === "Start" ? "Start" : labels[idx].slice(5);
-    ctx.beginPath();
-    ctx.moveTo(x, h - bottom + 2);
-    ctx.lineTo(x, h - bottom - 6);
-    ctx.strokeStyle = "rgba(217, 221, 228, 0.35)";
-    ctx.stroke();
-    ctx.fillText(label, x, h - 10);
-  });
+  const xTicks = pointRows.map((p, i) => `<text x="${p.x}" y="${h - 12}" text-anchor="middle" fill="#b6bbc6" font-size="10">${labels[i] === "Start" ? "Start" : labels[i].slice(5)}</text>`).join("");
+  const dots = pointRows.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="#d9dde4"/>`).join("");
+
+  root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Equity curve chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${yGrid}<path d="${path}" fill="none" stroke="#d9dde4" stroke-width="2.5"/>${dots}${xTicks}</svg>`;
 }
 
 function renderOverview() {
   const m = metrics();
-  const startInput = document.getElementById("startingBalanceInput");
-  if (startInput && document.activeElement !== startInput) startInput.value = String(Math.round(state.accountStart));
   const cards = [
     ["Net P/L", `$${m.net.toFixed(2)}`, m.net >= 0],
     ["Sessions", `${m.sessions}`, true],
@@ -481,6 +493,27 @@ function renderOverview() {
     : "<li>No setup data yet.</li>";
 
   drawEquity();
+}
+
+
+
+function accountOptions(selected = "") {
+  return state.accounts.map((account) => `<option value="${account.id}" ${selected === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`).join("");
+}
+
+function renderFilterSelects() {
+  const equity = document.getElementById("equityAccountFilter");
+  const journal = document.getElementById("journalAccountFilter");
+  if (equity) { equity.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.overviewAccountId)}`; equity.value = uiState.filters.overviewAccountId; }
+  if (journal) { journal.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.journalAccountId)}`; journal.value = uiState.filters.journalAccountId; }
+  const map = [["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]];
+  map.forEach(([id,key]) => { const input = document.getElementById(id); if (input && document.activeElement !== input) input.value = uiState.filters[key]; });
+}
+
+function renderAccounts() {
+  const list = document.getElementById("accountsList");
+  if (!list) return;
+  list.innerHTML = state.accounts.map((account) => `<div class="account-row"><div><strong>${escapeHtml(account.name)}</strong><div class="muted small">Start: $${formatWithThousands(account.startingBalance, 0)}</div></div><button data-remove-account="${account.id}" ${state.accounts.length <= 1 ? "disabled" : ""}>Remove</button></div>`).join("");
 }
 
 function renderSessionRules(session) {
@@ -576,7 +609,12 @@ function renderJournal() {
           .join("")
       : '<li class="muted">No custom symbols yet.</li>';
   }
-  const html = state.sessions
+  const filteredSessions = getFilteredSessions({
+    accountId: uiState.filters.journalAccountId,
+    from: uiState.filters.journalFrom,
+    to: uiState.filters.journalTo,
+  });
+  const html = filteredSessions
     .map((s) => {
       const net = getSessionNet(s);
       const adherence = getSessionRuleAdherence(s);
@@ -586,6 +624,9 @@ function renderJournal() {
           <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
           <label>Date
             <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
+          </label>
+          <label>Account
+            <select data-session-k="accountId" data-session-id="${s.id}">${accountOptions(s.accountId)}</select>
           </label>
           <div class="session-link-wrap">
             ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty" data-open-link="${s.id}">Add Link</button>`}
@@ -659,7 +700,7 @@ function renderPlaybookModalShot(setup) {
   if (!shotBtn) return;
   shotBtn.classList.toggle("session-shot-empty", !setup?.perfectSetup);
   shotBtn.innerHTML = setup?.perfectSetup
-    ? `<img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/><span class="shot-corner-arrow">↗</span>`
+    ? `<img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/><span class="shot-corner-arrow" data-upload-playbook-shot="1">↗</span>`
     : "Add screenshot";
 }
 
@@ -1059,11 +1100,13 @@ function closeImageModal() {
 
 function rerender() {
   saveState();
+  renderFilterSelects();
   renderOverview();
   renderJournal();
   renderRules();
   renderPlaybook();
   renderMistakes();
+  renderAccounts();
 }
 
 function addSession() {
@@ -1074,6 +1117,7 @@ function addSession() {
       mistakes: "",
       correctDecisions: "",
       rules: {},
+      accountId: state.accounts[0]?.id || DEFAULT_ACCOUNT_ID,
       trades: [],
     })
   );
@@ -1101,10 +1145,26 @@ function addRule() {
 }
 
 function addSetup() {
-  const name = document.getElementById("setupName").value.trim();
-  if (!name || state.playbook.some((item) => item.title.toLowerCase() === name.toLowerCase())) return;
-  state.playbook.push({ id: `pb${Date.now()}`, title: name, confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } });
-  document.getElementById("setupName").value = "";
+  const id = `pb${Date.now()}`;
+  state.playbook.push({ id, title: "New Setup", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } });
+  uiState.activePlaybookSetupId = id;
+  rerender();
+  const setup = state.playbook.find((item) => item.id === id);
+  document.getElementById("playbookModalTitleInput").value = setup.title;
+  document.getElementById("playbookModalConfluencesInput").value = "";
+  renderPlaybookModalShot(setup);
+  document.getElementById("playbookDetailModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+
+function addAccount() {
+  const name = document.getElementById("accountNameInput").value.trim();
+  const startingBalance = Number(document.getElementById("accountBalanceInput").value);
+  if (!name || !Number.isFinite(startingBalance) || startingBalance < 0) return;
+  state.accounts.push({ id: `acc${Date.now()}`, name, startingBalance });
+  document.getElementById("accountNameInput").value = "";
+  document.getElementById("accountBalanceInput").value = "";
   rerender();
 }
 
@@ -1159,7 +1219,8 @@ function importBackupFile(file) {
       const imported = parsed?.data || parsed;
       const migrated = migrateLegacyToSessions(imported);
       if (!Array.isArray(migrated?.sessions) || !Array.isArray(migrated?.rules)) throw new Error("Invalid backup format.");
-      state.accountStart = Number.isFinite(Number(migrated.accountStart)) && Number(migrated.accountStart) >= 0 ? Number(migrated.accountStart) : DEFAULT_STARTING_BALANCE;
+      const legacyStart = Number(migrated.accountStart);
+      state.accounts = (Array.isArray(migrated.accounts) && migrated.accounts.length ? migrated.accounts : [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE }]).map(normalizeAccount);
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
@@ -1174,7 +1235,7 @@ function importBackupFile(file) {
 }
 
 function resetToDemo() {
-  state.accountStart = seed.accountStart;
+  state.accounts = structuredClone(seed.accounts);
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions);
@@ -1284,6 +1345,19 @@ document.getElementById("addRuleBtn").addEventListener("click", addRule);
 document.getElementById("addSetupBtn").addEventListener("click", addSetup);
 document.getElementById("openCustomSymbolModalBtn").addEventListener("click", openCustomSymbolModal);
 document.getElementById("addCustomSymbolBtn").addEventListener("click", addCustomSymbol);
+document.getElementById("accountsList").addEventListener("click", (e) => {
+  const accountId = e.target.dataset.removeAccount;
+  if (!accountId || state.accounts.length <= 1) return;
+  const fallback = state.accounts.find((account) => account.id !== accountId)?.id;
+  state.accounts = state.accounts.filter((account) => account.id !== accountId);
+  state.sessions.forEach((session) => {
+    if (session.accountId === accountId) session.accountId = fallback;
+  });
+  if (uiState.filters.overviewAccountId === accountId) uiState.filters.overviewAccountId = "all";
+  if (uiState.filters.journalAccountId === accountId) uiState.filters.journalAccountId = "all";
+  rerender();
+});
+
 document.getElementById("customSymbolList").addEventListener("click", (e) => {
   const delSymbol = e.target.dataset.delSymbol;
   if (!delSymbol) return;
@@ -1294,11 +1368,16 @@ document.getElementById("exportBtn").addEventListener("click", exportBackup);
 document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importInput").click());
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
 document.getElementById("resetBtn").addEventListener("click", resetToDemo);
+document.getElementById("addAccountBtn").addEventListener("click", addAccount);
 
-document.getElementById("startingBalanceInput").addEventListener("input", (e) => {
-  const next = Number(e.target.value);
-  state.accountStart = Number.isFinite(next) && next >= 0 ? next : 0;
-  refreshAnalyticsOnly();
+[["equityAccountFilter","overviewAccountId"],["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalAccountFilter","journalAccountId"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]].forEach(([id,key]) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener("input", (e) => {
+    uiState.filters[key] = e.target.value;
+    if (key.startsWith("overview")) renderOverview();
+    else renderJournal();
+  });
 });
 
 document.getElementById("sessionList").addEventListener("input", (e) => {
@@ -1687,9 +1766,14 @@ document.getElementById("playbookList").addEventListener("click", (e) => {
   document.body.style.overflow = "hidden";
 });
 
-document.getElementById("playbookModalShotBtn").addEventListener("click", () => {
+document.getElementById("playbookModalShotBtn").addEventListener("click", (e) => {
   if (!uiState.activePlaybookSetupId) return;
-  document.getElementById("playbookModalShotInput").click();
+  const setup = state.playbook.find((item) => item.id === uiState.activePlaybookSetupId);
+  if (e.target.closest("[data-upload-playbook-shot]") || !setup?.perfectSetup) {
+    document.getElementById("playbookModalShotInput").click();
+    return;
+  }
+  openImageModal(setup.perfectSetup, { type: "playbook", id: setup.id });
 });
 
 document.getElementById("playbookModalShotInput").addEventListener("change", (e) => {
