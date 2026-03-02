@@ -183,7 +183,26 @@ function calcTradePnl(trade) {
   const entry = toNum(trade.entry);
   const exit = toNum(trade.exit);
   const multiplier = Number(trade.size || 0) * 2;
-  return multiplier * (exit - entry);
+  const direction = trade.type === "short" ? entry - exit : exit - entry;
+  return multiplier * direction;
+}
+
+function timeToMinutes(value) {
+  const normalized = normalizeTradeTime(value);
+  if (!normalized) return null;
+  const [hours, minutes] = normalized.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function calcTradeDuration(trade) {
+  const start = timeToMinutes(trade.entryTime);
+  const end = timeToMinutes(trade.exitTime);
+  if (start === null || end === null || end < start) return "—";
+  const diff = end - start;
+  const hours = Math.floor(diff / 60);
+  const minutes = diff % 60;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function timeToMinutes(value) {
