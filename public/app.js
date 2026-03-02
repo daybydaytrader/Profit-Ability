@@ -499,6 +499,14 @@ function syncEditorControls() {
   textColor.value = editor.textColor;
 }
 
+function setEditorExpanded(expanded) {
+  uiState.imageEditor.expanded = expanded;
+  uiState.imageEditor.visible = expanded;
+  syncEditorControls();
+  resizeEditCanvas();
+  redrawEditCanvas();
+}
+
 function getBaseImageDrawRect(canvas) {
   const base = uiState.imageEditor.baseImage;
   if (!canvas || !base?.naturalWidth || !base?.naturalHeight) {
@@ -1091,9 +1099,7 @@ document.getElementById("imageStage").addEventListener("click", (e) => {
   }
 
   if (!editor.expanded) {
-    editor.expanded = true;
-    editor.visible = true;
-    syncEditorControls();
+    setEditorExpanded(true);
     return;
   }
 
@@ -1118,9 +1124,7 @@ document.getElementById("imageStage").addEventListener("click", (e) => {
   }
 
   if (editor.mode === "cursor") {
-    editor.expanded = false;
-    editor.visible = false;
-    syncEditorControls();
+    setEditorExpanded(false);
   }
 });
 
