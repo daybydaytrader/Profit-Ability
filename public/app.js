@@ -72,7 +72,8 @@ const uiState = {
   activeImageTarget: null,
   activeLinkSessionId: null,
   activePlaybookSetupId: null,
-  accountModalMode: "account",
+  pendingAccountGroupId: "",
+  groupBuilderSelection: [],
   filters: {
     overviewAccountId: "all",
     overviewFrom: "",
@@ -1232,93 +1233,132 @@ function buildAccountSelectionOptions(selectedIds = []) {
     .join("");
 }
 
-function openAccountModal(mode = "account") {
-  uiState.accountModalMode = mode;
-  const title = document.getElementById("accountModalTitle");
-  const accountFields = document.getElementById("accountModalAccountFields");
-  const groupFields = document.getElementById("accountModalGroupFields");
-  const createWrap = document.getElementById("accountModalCreateGroupWrap");
-  const createGroupLabel = document.getElementById("accountModalCreateGroupMembersLabel");
-  const createGroupAccounts = document.getElementById("accountModalCreateGroupAccounts");
-  const saveBtn = document.getElementById("saveAccountBtn");
-
-  if (mode === "group") {
-    if (title) title.textContent = "Add Group";
-    if (accountFields) accountFields.hidden = true;
-    if (groupFields) groupFields.hidden = false;
-    if (createWrap) createWrap.hidden = false;
-    if (saveBtn) saveBtn.textContent = "Save Group";
-    if (createGroupLabel) createGroupLabel.firstChild.textContent = "Select existing accounts";
-    if (createGroupAccounts) createGroupAccounts.innerHTML = buildAccountSelectionOptions([]);
-    document.getElementById("groupModalNameInput").value = "";
-    document.getElementById("accountModalNewGroupNameInput").value = "";
-  } else {
-    if (title) title.textContent = "Add Account";
-    if (accountFields) accountFields.hidden = false;
-    if (groupFields) groupFields.hidden = true;
-    if (saveBtn) saveBtn.textContent = "Save Account";
-
-    const select = document.getElementById("accountModalGroupSelect");
-    if (select) {
-      const options = state.groups.length
-        ? [`<option value="">No group</option>`, ...state.groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)} (${getGroupAccountCount(group.id)} acc)</option>`), '<option value="__create__">+ Create new group</option>']
-        : ['<option value="__create__">+ Create new group</option>'];
-      select.innerHTML = options.join("");
-      select.value = state.groups.length ? "" : "__create__";
-    }
-    if (createWrap) createWrap.hidden = state.groups.length > 0;
-    if (createGroupLabel) createGroupLabel.firstChild.textContent = "Include existing accounts";
-    if (createGroupAccounts) createGroupAccounts.innerHTML = buildAccountSelectionOptions([]);
-    document.getElementById("accountModalNameInput").value = "";
-    document.getElementById("accountModalBalanceInput").value = "";
-    document.getElementById("accountModalDrawdownInput").value = "";
-    document.getElementById("accountModalNewGroupNameInput").value = "";
-  }
-
+function openAccountModal() {
+  uiState.pendingAccountGroupId = "";
+  document.getElementById("accountModalNameInput").value = "";
+  document.getElementById("accountModalBalanceInput").value = "";
+  document.getElementById("accountModalDrawdownInput").value = "";
+  document.getElementById("accountModalGroupPreview").textContent = "No group selected";
   document.getElementById("accountDetailModal").hidden = false;
   document.body.style.overflow = "hidden";
 }
 
 function closeAccountModal() {
   document.getElementById("accountDetailModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden) document.body.style.overflow = "";
 }
 
 function saveAccountFromModal() {
-  if (uiState.accountModalMode === "group") {
-    const name = document.getElementById("groupModalNameInput").value.trim();
-    if (!name) return;
-    const selected = Array.from(document.getElementById("accountModalCreateGroupAccounts").selectedOptions).map((opt) => opt.value);
-    const group = normalizeGroup({ id: `grp${Date.now()}`, name });
-    state.groups.push(group);
-    state.accounts.forEach((account) => {
-      if (selected.includes(account.id)) account.groupId = group.id;
-    });
-    closeAccountModal();
-    rerender();
-    return;
-  }
-
   const name = document.getElementById("accountModalNameInput").value.trim();
   const startingBalance = Number(document.getElementById("accountModalBalanceInput").value || DEFAULT_STARTING_BALANCE);
   const maxDrawdown = Number(document.getElementById("accountModalDrawdownInput").value || 0);
   if (!name || !Number.isFinite(startingBalance) || startingBalance < 0 || !Number.isFinite(maxDrawdown) || maxDrawdown < 0) return;
 
-  let groupId = document.getElementById("accountModalGroupSelect").value;
-  if (groupId === "__create__") {
-    const groupName = document.getElementById("accountModalNewGroupNameInput").value.trim() || `${name} Group`;
-    const created = normalizeGroup({ id: `grp${Date.now()}`, name: groupName });
-    state.groups.push(created);
-    groupId = created.id;
-
-    const selectedExisting = Array.from(document.getElementById("accountModalCreateGroupAccounts").selectedOptions).map((opt) => opt.value);
-    state.accounts.forEach((account) => {
-      if (selectedExisting.includes(account.id)) account.groupId = created.id;
-    });
-  }
-
-  state.accounts.push(normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: groupId || "" }));
+  state.accounts.push(normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: uiState.pendingAccountGroupId || "" }));
   closeAccountModal();
+  rerender();
+}
+
+function addGroup() {
+  openGroupBuilderModal();
+}
+
+function renderAccountGroupCards() {
+  const container = document.getElementById("accountGroupCards");
+  if (!container) return;
+  container.innerHTML = state.groups.length
+    ? state.groups
+        .map((group) => {
+          const members = state.accounts.filter((account) => account.groupId === group.id);
+          return `<article class="playbook-card" data-group-card="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><span class="pill">${members.length} acc</span></div><div class="muted small" data-group-members="${group.id}" hidden>${members.length ? members.map((a) => escapeHtml(a.name)).join("<br/>") : "No accounts yet."}</div></article>`;
+        })
+        .join("")
+    : '<p class="muted">No groups yet.</p>';
+}
+
+function openAccountGroupPickerModal() {
+  renderAccountGroupCards();
+  document.getElementById("accountGroupPickerModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeAccountGroupPickerModal() {
+  document.getElementById("accountGroupPickerModal").hidden = true;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("groupBuilderModal").hidden) document.body.style.overflow = "";
+}
+
+function refreshGroupBuilderLists() {
+  const available = document.getElementById("groupBuilderAvailable");
+  const selected = document.getElementById("groupBuilderSelected");
+  if (!available || !selected) return;
+  const pool = state.accounts.filter((account) => !account.groupId || uiState.groupBuilderSelection.includes(account.id));
+  const availableIds = pool.map((a) => a.id).filter((id) => !uiState.groupBuilderSelection.includes(id));
+  available.innerHTML = availableIds.map((id) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    return `<option value="${id}">${escapeHtml(acc?.name || id)}</option>`;
+  }).join("");
+  selected.innerHTML = uiState.groupBuilderSelection.map((id) => {
+    const acc = state.accounts.find((a) => a.id === id);
+    return `<option value="${id}">${escapeHtml(acc?.name || id)}</option>`;
+  }).join("");
+  available.querySelectorAll("option").forEach((opt) => { opt.draggable = true; });
+  selected.querySelectorAll("option").forEach((opt) => { opt.draggable = true; });
+}
+
+function moveGroupBuilderSelection(fromId, toSelected) {
+  const select = document.getElementById(fromId);
+  if (!select) return;
+  const ids = Array.from(select.selectedOptions).map((opt) => opt.value);
+  if (!ids.length) return;
+  if (toSelected) uiState.groupBuilderSelection = [...new Set([...uiState.groupBuilderSelection, ...ids])];
+  else uiState.groupBuilderSelection = uiState.groupBuilderSelection.filter((id) => !ids.includes(id));
+  refreshGroupBuilderLists();
+}
+
+function wireGroupBuilderDnD(selectEl, toSelected) {
+  if (!selectEl) return;
+  selectEl.addEventListener("dragstart", (e) => {
+    const option = e.target.closest("option");
+    if (!option) return;
+    e.dataTransfer?.setData("text/plain", option.value);
+  });
+  selectEl.addEventListener("dragover", (e) => e.preventDefault());
+  selectEl.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const id = e.dataTransfer?.getData("text/plain");
+    if (!id) return;
+    if (toSelected) uiState.groupBuilderSelection = [...new Set([...uiState.groupBuilderSelection, id])];
+    else uiState.groupBuilderSelection = uiState.groupBuilderSelection.filter((item) => item !== id);
+    refreshGroupBuilderLists();
+  });
+}
+
+function openGroupBuilderModal() {
+  uiState.groupBuilderSelection = [];
+  document.getElementById("groupBuilderNameInput").value = "";
+  refreshGroupBuilderLists();
+  document.getElementById("groupBuilderModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeGroupBuilderModal() {
+  document.getElementById("groupBuilderModal").hidden = true;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden) document.body.style.overflow = "";
+}
+
+function saveGroupFromBuilder() {
+  const name = document.getElementById("groupBuilderNameInput").value.trim();
+  if (!name) return;
+  const group = normalizeGroup({ id: `grp${Date.now()}`, name });
+  state.groups.push(group);
+  state.accounts.forEach((account) => {
+    if (uiState.groupBuilderSelection.includes(account.id)) account.groupId = group.id;
+  });
+  if (!document.getElementById("accountGroupPickerModal").hidden) {
+    uiState.pendingAccountGroupId = group.id;
+    document.getElementById("accountModalGroupPreview").textContent = `Selected: ${group.name}`;
+  }
+  closeGroupBuilderModal();
   rerender();
 }
 
@@ -1542,18 +1582,39 @@ document.getElementById("importInput").addEventListener("change", (e) => importB
 document.getElementById("resetBtn").addEventListener("click", resetToDemo);
 document.getElementById("addAccountBtn").addEventListener("click", openAccountModal);
 document.getElementById("saveAccountBtn").addEventListener("click", saveAccountFromModal);
-document.getElementById("accountModalGroupSelect").addEventListener("change", (e) => {
-  const wrap = document.getElementById("accountModalCreateGroupWrap");
-  if (wrap) wrap.hidden = e.target.value !== "__create__";
-  if (e.target.value === "__create__") {
-    const createGroupAccounts = document.getElementById("accountModalCreateGroupAccounts");
-    if (createGroupAccounts) createGroupAccounts.innerHTML = buildAccountSelectionOptions([]);
-  }
-});
 document.getElementById("accountDetailModal").addEventListener("click", (e) => {
   if (e.target.matches("[data-close-account-modal]")) closeAccountModal();
 });
 document.getElementById("addGroupBtn").addEventListener("click", addGroup);
+document.getElementById("openAccountGroupPickerBtn").addEventListener("click", openAccountGroupPickerModal);
+document.getElementById("accountGroupPickerModal").addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-account-group-picker-modal]")) {
+    closeAccountGroupPickerModal();
+    return;
+  }
+  const cardId = e.target.closest("[data-group-card]")?.dataset.groupCard;
+  if (!cardId) return;
+  if (e.target.closest(".playbook-card-head") || e.target.closest("h4") || e.target.closest(".pill")) {
+    uiState.pendingAccountGroupId = cardId;
+    const group = getGroupById(cardId);
+    document.getElementById("accountModalGroupPreview").textContent = `Selected: ${group?.name || "No group"}`;
+  }
+  const body = e.target.closest("[data-group-card]")?.querySelector(`[data-group-members="${cardId}"]`);
+  if (body) body.hidden = !body.hidden;
+});
+document.getElementById("openGroupBuilderFromPickerBtn").addEventListener("click", () => {
+  closeAccountGroupPickerModal();
+  openGroupBuilderModal();
+});
+document.getElementById("groupBuilderModal").addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-group-builder-modal]")) closeGroupBuilderModal();
+});
+document.getElementById("groupBuilderAddBtn").addEventListener("click", () => moveGroupBuilderSelection("groupBuilderAvailable", true));
+document.getElementById("groupBuilderRemoveBtn").addEventListener("click", () => moveGroupBuilderSelection("groupBuilderSelected", false));
+document.getElementById("saveGroupBuilderBtn").addEventListener("click", saveGroupFromBuilder);
+
+wireGroupBuilderDnD(document.getElementById("groupBuilderAvailable"), false);
+wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
 
 [["equityAccountFilter","overviewAccountId"],["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalAccountFilter","journalAccountId"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]].forEach(([id,key]) => {
   const el = document.getElementById(id);
@@ -1904,6 +1965,8 @@ window.addEventListener("keydown", (e) => {
   closeImageModal();
   closeLinkModal();
   closeAccountModal();
+  closeAccountGroupPickerModal();
+  closeGroupBuilderModal();
   const playbookModal = document.getElementById("playbookDetailModal");
   if (playbookModal && !playbookModal.hidden) playbookModal.hidden = true;
 });

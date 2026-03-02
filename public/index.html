@@ -206,8 +206,7 @@
       <div class="image-modal-backdrop playbook-backdrop" data-close-account-modal></div>
       <div class="image-modal-content playbook-detail-content">
         <button class="image-modal-close" type="button" data-close-account-modal aria-label="Close account modal">✕</button>
-        <h3 id="accountModalTitle">Add Account</h3>
-        <div id="accountModalAccountFields">
+        <h3>Add Account</h3>
         <label>Account name
           <input id="accountModalNameInput" type="text" placeholder="e.g. Apex 50k" />
         </label>
@@ -217,25 +216,50 @@
         <label>Max drawdown
           <input id="accountModalDrawdownInput" type="number" min="0" step="100" placeholder="2500" />
         </label>
-        <label>Add to group
-          <select id="accountModalGroupSelect"></select>
-        </label>
-        </div>
-        <div id="accountModalCreateGroupWrap">
-          <label>New group name
-            <input id="accountModalNewGroupNameInput" type="text" placeholder="e.g. Eval Batch A" />
-          </label>
-          <label id="accountModalCreateGroupMembersLabel">Include existing accounts
-            <select id="accountModalCreateGroupAccounts" multiple></select>
-          </label>
-        </div>
-        <div id="accountModalGroupFields" hidden>
-          <label>Group name
-            <input id="groupModalNameInput" type="text" placeholder="e.g. Eval Batch A" />
-          </label>
+        <div class="link-modal-actions account-modal-group-actions">
+          <button id="openAccountGroupPickerBtn" type="button">Add to group</button>
+          <span id="accountModalGroupPreview" class="muted small">No group selected</span>
         </div>
         <div class="link-modal-actions">
           <button id="saveAccountBtn" type="button">Save Account</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="accountGroupPickerModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-account-group-picker-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-account-group-picker-modal aria-label="Close add to group modal">✕</button>
+        <h3>Add to Group</h3>
+        <div id="accountGroupCards" class="playbook-grid"></div>
+        <div class="link-modal-actions">
+          <button id="openGroupBuilderFromPickerBtn" type="button">Add Group</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="groupBuilderModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-group-builder-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-group-builder-modal aria-label="Close add group modal">✕</button>
+        <h3>Add Group</h3>
+        <label>Name
+          <input id="groupBuilderNameInput" type="text" placeholder="e.g. Eval Batch A" />
+        </label>
+        <div class="group-builder-transfer">
+          <label>Available accounts (not in a group)
+            <select id="groupBuilderAvailable" multiple size="8"></select>
+          </label>
+          <div class="group-transfer-buttons">
+            <button id="groupBuilderAddBtn" type="button">→</button>
+            <button id="groupBuilderRemoveBtn" type="button">←</button>
+          </div>
+          <label>Accounts in this group
+            <select id="groupBuilderSelected" multiple size="8"></select>
+          </label>
+        </div>
+        <div class="link-modal-actions">
+          <button id="saveGroupBuilderBtn" type="button">Save Group</button>
         </div>
       </div>
     </div>
