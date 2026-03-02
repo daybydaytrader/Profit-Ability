@@ -4,6 +4,7 @@ const DEFAULT_STARTING_BALANCE = 50000;
 
 const seed = {
   accountStart: DEFAULT_STARTING_BALANCE,
+  playbook: ["ORB", "Pullback"],
   rules: [
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
     { id: "r2", name: "Market condition", type: "select", options: ["Trending", "Choppy", "News-driven"] },
@@ -16,8 +17,8 @@ const seed = {
       correctDecisions: "Waited for breakout confirmation",
       rules: { r1: true, r2: "Trending" },
       trades: [
-        { id: "t1", symbol: "TSLA", setup: "ORB", type: "long", size: 10, entry: 240.1, exit: 245.6, stop: 2.5 },
-        { id: "t2", symbol: "NVDA", setup: "Pullback", type: "short", size: 4, entry: 801.2, exit: 799.0, stop: 1.2 },
+        { id: "t1", symbol: "TSLA", entryTime: "09:35", exitTime: "10:02", setup: "ORB", type: "long", size: 10, entry: 240.1, exit: 245.6, stop: 2.5 },
+        { id: "t2", symbol: "NVDA", entryTime: "10:10", exitTime: "10:41", setup: "Pullback", type: "short", size: 4, entry: 801.2, exit: 799.0, stop: 1.2 },
       ],
     },
   ],
@@ -58,10 +59,18 @@ function toNum(v) {
   return Number(cleaned || 0);
 }
 
+function normalizeTradeTime(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+  return match ? raw : "";
+}
+
 function normalizeTrade(t) {
   return {
     id: t.id || `t${Date.now()}`,
     symbol: t.symbol || "",
+    entryTime: normalizeTradeTime(t.entryTime || t.time),
+    exitTime: normalizeTradeTime(t.exitTime),
     setup: t.setup || "",
     type: t.type === "short" ? "short" : "long",
     size: Number(t.size || 0),
@@ -69,6 +78,13 @@ function normalizeTrade(t) {
     exit: toNum(t.exit),
     stop: toNum(t.stop),
   };
+}
+
+function normalizePlaybook(playbook) {
+  const seen = new Set();
+  return (Array.isArray(playbook) ? playbook : [])
+    .map((setup) => String(setup || "").trim())
+    .filter((setup) => setup && !seen.has(setup) && seen.add(setup));
 }
 
 function normalizeSession(session) {
@@ -109,6 +125,8 @@ function migrateLegacyToSessions(raw) {
         .map((t) => ({
           id: t.id,
           symbol: t.symbol,
+          entryTime: normalizeTradeTime(t.entryTime || t.time),
+          exitTime: normalizeTradeTime(t.exitTime),
           setup: t.setup,
           type: t.type || "long",
           size: t.size || 0,
@@ -133,9 +151,12 @@ function loadState() {
   parsed = migrateLegacyToSessions(parsed);
   const rules = Array.isArray(parsed.rules) ? parsed.rules : [];
   const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeSession) : [];
+  const inferredSetups = sessions.flatMap((session) => session.trades.map((trade) => String(trade.setup || "").trim())).filter(Boolean);
+  const playbook = normalizePlaybook(parsed.playbook?.length ? parsed.playbook : inferredSetups);
   const accountStart = Number(parsed.accountStart);
   return {
     accountStart: Number.isFinite(accountStart) && accountStart >= 0 ? accountStart : DEFAULT_STARTING_BALANCE,
+    playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
     sessions: sessions.length ? sessions : structuredClone(seed.sessions),
   };
@@ -163,6 +184,24 @@ function calcTradePnl(trade) {
   const exit = toNum(trade.exit);
   const multiplier = Number(trade.size || 0) * 2;
   return multiplier * (exit - entry);
+}
+
+function timeToMinutes(value) {
+  const normalized = normalizeTradeTime(value);
+  if (!normalized) return null;
+  const [hours, minutes] = normalized.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function calcTradeDuration(trade) {
+  const start = timeToMinutes(trade.entryTime);
+  const end = timeToMinutes(trade.exitTime);
+  if (start === null || end === null || end < start) return "—";
+  const diff = end - start;
+  const hours = Math.floor(diff / 60);
+  const minutes = diff % 60;
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function getAllTrades() {
@@ -300,6 +339,31 @@ function renderOverview() {
     ? [...habits].reverse().slice(0, 3).map((h) => `<li>${escapeHtml(h.name)} <span class="pill">${h.pct.toFixed(0)}%</span></li>`).join("")
     : "<li>No checkbox rules yet.</li>";
 
+  const setups = new Map();
+  getAllTrades().forEach((trade) => {
+    const name = String(trade.setup || "").trim();
+    if (!name) return;
+    const pnl = calcTradePnl(trade);
+    const current = setups.get(name) || { wins: 0, total: 0 };
+    current.total += 1;
+    if (pnl > 0) current.wins += 1;
+    setups.set(name, current);
+  });
+
+  const bestSetups = [...setups.entries()]
+    .map(([name, stats]) => ({
+      name,
+      winRate: stats.total ? (stats.wins / stats.total) * 100 : 0,
+      wins: stats.wins,
+      total: stats.total,
+    }))
+    .sort((a, b) => b.winRate - a.winRate || b.total - a.total || a.name.localeCompare(b.name))
+    .slice(0, 3);
+
+  document.getElementById("bestSetupList").innerHTML = bestSetups.length
+    ? bestSetups.map((setup) => `<li><span class="pill">${setup.winRate.toFixed(0)}%</span> ${escapeHtml(setup.name)} (${setup.wins}/${setup.total})</li>`).join("")
+    : "<li>No setup data yet.</li>";
+
   drawEquity();
 }
 
@@ -332,12 +396,21 @@ function renderSessionTrades(session) {
       return `
       <tr>
         <td><input data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}" value="${escapeHtml(t.symbol || "")}"/></td>
-        <td><input data-trade-k="setup" data-session-id="${session.id}" data-trade-id="${t.id}" value="${escapeHtml(t.setup || "")}"/></td>
+        <td>
+          <select data-trade-k="setup" data-session-id="${session.id}" data-trade-id="${t.id}">
+            <option value="">— Select setup —</option>
+            ${state.playbook.map((setup) => `<option value="${escapeHtml(setup)}" ${t.setup === setup ? "selected" : ""}>${escapeHtml(setup)}</option>`).join("")}
+            ${t.setup && !state.playbook.includes(t.setup) ? `<option value="${escapeHtml(t.setup)}" selected>${escapeHtml(t.setup)} (legacy)</option>` : ""}
+          </select>
+        </td>
         <td><select data-trade-k="type" data-session-id="${session.id}" data-trade-id="${t.id}"><option value="long" ${t.type === "long" ? "selected" : ""}>long</option><option value="short" ${t.type === "short" ? "selected" : ""}>short</option></select></td>
         <td><input data-trade-k="size" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="1" value="${t.size ?? 0}"/></td>
         <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" value="${toNum(t.entry)}"/></td>
+        <td><input data-trade-k="entryTime" data-session-id="${session.id}" data-trade-id="${t.id}" type="time" value="${normalizeTradeTime(t.entryTime)}"/></td>
         <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" value="${toNum(t.exit)}"/></td>
+        <td><input data-trade-k="exitTime" data-session-id="${session.id}" data-trade-id="${t.id}" type="time" value="${normalizeTradeTime(t.exitTime)}"/></td>
         <td><input data-trade-k="stop" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${toNum(t.stop)}"/></td>
+        <td data-trade-duration="${t.id}">${calcTradeDuration(t)}</td>
         <td data-trade-r="${t.id}">${r.toFixed(1)}</td>
         <td data-trade-pnl="${t.id}" class="${pnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}</td>
         <td><button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button></td>
@@ -345,7 +418,7 @@ function renderSessionTrades(session) {
     })
     .join("");
 
-  return rows || `<tr><td colspan="10" class="muted">No trades yet.</td></tr>`;
+  return rows || `<tr><td colspan="13" class="muted">No trades yet.</td></tr>`;
 }
 
 function parseYoutubeId(url) {
@@ -415,7 +488,7 @@ function renderJournal() {
           s.collapsed
             ? ""
             : `<div class="session-actions"><span class="pill">${s.trades.length} trades</span><button data-add-trade="${s.id}">+ Add Trade</button></div>
-               <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Exit</th><th>Stop</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
+               <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Entry Time</th><th>Exit</th><th>Exit Time</th><th>Stop</th><th>Duration</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
         }
       </article>`;
     })
@@ -430,6 +503,13 @@ function renderRules() {
     state.rules
       .map((r) => `<li><strong>${escapeHtml(r.name)}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.map(escapeHtml).join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`)
       .join("") || "<li>No rules yet.</li>";
+}
+
+function renderPlaybook() {
+  document.getElementById("playbookList").innerHTML =
+    state.playbook
+      .map((setup) => `<li><strong>${escapeHtml(setup)}</strong> <button data-remove-setup="${escapeHtml(setup)}">Remove</button></li>`)
+      .join("") || "<li>No setups yet.</li>";
 }
 
 function renderMistakes() {
@@ -797,6 +877,7 @@ function rerender() {
   renderOverview();
   renderJournal();
   renderRules();
+  renderPlaybook();
   renderMistakes();
 }
 
@@ -817,7 +898,7 @@ function addSession() {
 function addTradeToSession(sessionId) {
   const session = state.sessions.find((s) => s.id === sessionId);
   if (!session) return;
-  session.trades.unshift({ id: `t${Date.now()}`, symbol: "", setup: "", type: "long", size: 0, entry: 0, exit: 0, stop: 1 });
+  session.trades.unshift({ id: `t${Date.now()}`, symbol: "", entryTime: "", exitTime: "", setup: "", type: "long", size: 0, entry: 0, exit: 0, stop: 1 });
   rerender();
 }
 
@@ -831,6 +912,14 @@ function addRule() {
   state.rules.push({ id: `r${Date.now()}`, name, type, options });
   document.getElementById("ruleName").value = "";
   document.getElementById("ruleOptions").value = "";
+  rerender();
+}
+
+function addSetup() {
+  const name = document.getElementById("setupName").value.trim();
+  if (!name || state.playbook.includes(name)) return;
+  state.playbook.push(name);
+  document.getElementById("setupName").value = "";
   rerender();
 }
 
@@ -855,6 +944,8 @@ function importBackupFile(file) {
       const migrated = migrateLegacyToSessions(imported);
       if (!Array.isArray(migrated?.sessions) || !Array.isArray(migrated?.rules)) throw new Error("Invalid backup format.");
       state.accountStart = Number.isFinite(Number(migrated.accountStart)) && Number(migrated.accountStart) >= 0 ? Number(migrated.accountStart) : DEFAULT_STARTING_BALANCE;
+      state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
+      if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
       state.sessions = migrated.sessions.map(normalizeSession);
       rerender();
@@ -867,6 +958,7 @@ function importBackupFile(file) {
 
 function resetToDemo() {
   state.accountStart = seed.accountStart;
+  state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions);
   rerender();
@@ -900,6 +992,7 @@ function updateTradeField(target) {
   if (!key) return null;
 
   if (["size", "entry", "exit", "stop"].includes(key)) trade[key] = toNum(target.value);
+  else if (["entryTime", "exitTime"].includes(key)) trade[key] = normalizeTradeTime(target.value);
   else trade[key] = target.value;
 
   return { session, trade };
@@ -928,6 +1021,9 @@ function updateTradeComputedUI(sessionId, tradeId) {
     pnlCell.classList.toggle("bad", pnl < 0);
   }
 
+  const durationCell = document.querySelector(`[data-trade-duration="${tradeId}"]`);
+  if (durationCell) durationCell.textContent = calcTradeDuration(trade);
+
   const rCell = document.querySelector(`[data-trade-r="${tradeId}"]`);
   if (rCell) rCell.textContent = r.toFixed(1);
 
@@ -954,6 +1050,7 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
 
 document.getElementById("addSessionBtn").addEventListener("click", addSession);
 document.getElementById("addRuleBtn").addEventListener("click", addRule);
+document.getElementById("addSetupBtn").addEventListener("click", addSetup);
 document.getElementById("exportBtn").addEventListener("click", exportBackup);
 document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importInput").click());
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
@@ -1307,6 +1404,18 @@ document.getElementById("ruleList").addEventListener("click", (e) => {
   state.rules = state.rules.filter((r) => r.id !== rid);
   state.sessions.forEach((s) => {
     if (s.rules) delete s.rules[rid];
+  });
+  rerender();
+});
+
+document.getElementById("playbookList").addEventListener("click", (e) => {
+  const setup = e.target.dataset.removeSetup;
+  if (!setup) return;
+  state.playbook = state.playbook.filter((item) => item !== setup);
+  state.sessions.forEach((session) => {
+    session.trades.forEach((trade) => {
+      if (trade.setup === setup) trade.setup = "";
+    });
   });
   rerender();
 });
