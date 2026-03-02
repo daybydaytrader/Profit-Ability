@@ -64,7 +64,31 @@
         <section id="tab-journal" class="tab">
           <div class="panel">
             <h2>Journal</h2>
-            <button id="addSessionBtn">+ Add Session</button>
+            <div class="journal-controls">
+              <button id="addSessionBtn">+ Add Session</button>
+              <button id="openCustomSymbolModalBtn" type="button">Add symbol</button>
+            </div>
+            <div id="customSymbolModal" class="image-modal" hidden>
+              <div class="image-modal-backdrop" data-close-symbol-modal></div>
+              <div class="image-modal-content symbol-modal-content">
+                <button class="image-modal-close" type="button" data-close-symbol-modal aria-label="Close symbol modal">✕</button>
+                <h3>Add custom symbol</h3>
+                <label>Ticker
+                  <input id="customSymbolTicker" type="text" maxlength="12" placeholder="e.g. RTY" />
+                </label>
+                <label>Tick size
+                  <input id="customSymbolTickSize" type="number" min="0.0001" step="0.0001" placeholder="0.1" />
+                </label>
+                <label>$ per tick / contract
+                  <input id="customSymbolTickValue" type="number" min="0.0001" step="0.01" placeholder="5" />
+                </label>
+                <div class="link-modal-actions">
+                  <button id="addCustomSymbolBtn" type="button">Add</button>
+                </div>
+                <p id="customSymbolStatus" class="muted small"></p>
+                <ul id="customSymbolList" class="symbol-list"></ul>
+              </div>
+            </div>
             <div id="sessionList" class="session-list-column"></div>
           </div>
         </section>

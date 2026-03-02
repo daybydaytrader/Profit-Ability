@@ -32,9 +32,39 @@ const seed = {
       ],
     },
   ],
+  customSymbols: [],
 };
 
-const state = loadState();
+let state;
+
+function normalizeCustomSymbol(symbol) {
+  const ticker = String(symbol?.ticker || "").trim().toUpperCase();
+  const tickSize = Number(symbol?.tickSize);
+  const tickValue = Number(symbol?.tickValue);
+  if (!ticker || !Number.isFinite(tickSize) || tickSize <= 0 || !Number.isFinite(tickValue) || tickValue <= 0) return null;
+  return { ticker, tickSize, tickValue };
+}
+
+function getAllSymbolOptions() {
+  const custom = (state.customSymbols || []).map((item) => item.ticker);
+  return [...new Set([...SYMBOL_OPTIONS, ...custom])];
+}
+
+function getBasePriceStep(symbol) {
+  if (["NQ", "MNQ", "ES", "MES"].includes(symbol)) return 0.25;
+  if (["GC", "MGC"].includes(symbol)) return 0.1;
+  return 0.01;
+}
+
+function getSymbolConfig(symbol) {
+  const normalized = String(symbol || "").trim().toUpperCase();
+  const custom = (state.customSymbols || []).find((item) => item.ticker === normalized);
+  if (custom) return { tickSize: custom.tickSize, pointValue: custom.tickValue / custom.tickSize };
+  const pointValue = POINT_VALUE_BY_SYMBOL[normalized] || 2;
+  return { tickSize: getBasePriceStep(normalized), pointValue };
+}
+
+state = loadState();
 const uiState = {
   activeImageTarget: null,
   activeLinkSessionId: null,
@@ -77,9 +107,7 @@ function normalizeTradeTime(value) {
 }
 
 function getPriceStep(symbol) {
-  if (["NQ", "MNQ", "ES", "MES"].includes(symbol)) return 0.25;
-  if (["GC", "MGC"].includes(symbol)) return 0.1;
-  return 0.01;
+  return getSymbolConfig(symbol).tickSize;
 }
 
 function snapPriceToSymbol(value, symbol) {
@@ -102,8 +130,8 @@ function formatWithThousands(value, decimals = 2) {
 
 function formatTradePrice(value, symbol) {
   const step = getPriceStep(symbol);
-  const decimals = step === 0.25 ? 2 : step === 0.1 ? 1 : 2;
-  return formatWithThousands(snapPriceToSymbol(value, symbol), decimals);
+  const decimals = Math.max(0, String(step).split(".")[1]?.length || 0);
+  return formatWithThousands(snapPriceToSymbol(value, symbol), decimals || 2);
 }
 
 function normalizeTrade(t) {
@@ -237,11 +265,13 @@ function loadState() {
   const inferredSetups = sessions.flatMap((session) => session.trades.map((trade) => String(trade.setup || "").trim())).filter(Boolean);
   const playbook = normalizePlaybook(parsed.playbook?.length ? parsed.playbook : inferredSetups);
   const accountStart = Number(parsed.accountStart);
+  const customSymbols = Array.isArray(parsed.customSymbols) ? parsed.customSymbols.map(normalizeCustomSymbol).filter(Boolean) : [];
   return {
     accountStart: Number.isFinite(accountStart) && accountStart >= 0 ? accountStart : DEFAULT_STARTING_BALANCE,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
     sessions: sessions.length ? sessions : structuredClone(seed.sessions),
+    customSymbols,
   };
 }
 
@@ -267,7 +297,7 @@ function calcTradePnl(trade) {
   const exit = toNum(trade.exit);
   const size = Number(trade.size || 0);
   const symbol = String(trade.symbol || "").trim().toUpperCase();
-  const pointValue = POINT_VALUE_BY_SYMBOL[symbol] || 2;
+  const pointValue = getSymbolConfig(symbol).pointValue;
   const direction = trade.type === "short" ? entry - exit : exit - entry;
   return size * pointValue * direction;
 }
@@ -475,6 +505,7 @@ function renderSessionRules(session) {
 }
 
 function renderSessionTrades(session) {
+  const symbolOptions = getAllSymbolOptions();
   const rows = session.trades
     .map((t) => {
       const pnl = calcTradePnl(t);
@@ -483,8 +514,8 @@ function renderSessionTrades(session) {
       <tr>
         <td>
           <select data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}">
-            ${SYMBOL_OPTIONS.map((symbol) => `<option value="${symbol}" ${t.symbol === symbol ? "selected" : ""}>${symbol}</option>`).join("")}
-            ${t.symbol && !SYMBOL_OPTIONS.includes(t.symbol) ? `<option value="${escapeHtml(t.symbol)}" selected>${escapeHtml(t.symbol)} (legacy)</option>` : ""}
+            ${symbolOptions.map((symbol) => `<option value="${symbol}" ${t.symbol === symbol ? "selected" : ""}>${symbol}</option>`).join("")}
+            ${t.symbol && !symbolOptions.includes(t.symbol) ? `<option value="${escapeHtml(t.symbol)}" selected>${escapeHtml(t.symbol)} (legacy)</option>` : ""}
           </select>
         </td>
         <td>
@@ -537,6 +568,14 @@ async function getYoutubeTitle(url) {
 }
 
 function renderJournal() {
+  const customList = document.getElementById("customSymbolList");
+  if (customList) {
+    customList.innerHTML = state.customSymbols.length
+      ? state.customSymbols
+          .map((item) => `<li><strong>${escapeHtml(item.ticker)}</strong> • tick ${item.tickSize} • $${item.tickValue}/tick <button type="button" data-del-symbol="${item.ticker}">Remove</button></li>`)
+          .join("")
+      : '<li class="muted">No custom symbols yet.</li>';
+  }
   const html = state.sessions
     .map((s) => {
       const net = getSessionNet(s);
@@ -900,7 +939,20 @@ function openLinkModal(sessionId) {
 function closeLinkModal() {
   document.getElementById("linkModal").hidden = true;
   uiState.activeLinkSessionId = null;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("customSymbolModal").hidden) document.body.style.overflow = "";
+}
+
+function openCustomSymbolModal() {
+  document.getElementById("customSymbolModal").hidden = false;
+  setCustomSymbolStatus("");
+  document.body.style.overflow = "hidden";
+}
+
+function closeCustomSymbolModal() {
+  document.getElementById("customSymbolModal").hidden = true;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden) {
+    document.body.style.overflow = "";
+  }
 }
 
 async function saveLinkFromModal() {
@@ -991,7 +1043,7 @@ function closeImageModal() {
   uiState.imageEditor.blockUntil = 0;
   uiState.imageEditor.baseImage = null;
   resetImageEditorState();
-  if (document.getElementById("linkModal").hidden && document.getElementById("playbookDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("linkModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("customSymbolModal").hidden) document.body.style.overflow = "";
 }
 
 function rerender() {
@@ -1045,6 +1097,37 @@ function addSetup() {
   rerender();
 }
 
+function setCustomSymbolStatus(message) {
+  const status = document.getElementById("customSymbolStatus");
+  if (status) status.textContent = message;
+}
+
+function addCustomSymbol() {
+  const tickerInput = document.getElementById("customSymbolTicker");
+  const tickSizeInput = document.getElementById("customSymbolTickSize");
+  const tickValueInput = document.getElementById("customSymbolTickValue");
+  const candidate = normalizeCustomSymbol({
+    ticker: tickerInput.value,
+    tickSize: tickSizeInput.value,
+    tickValue: tickValueInput.value,
+  });
+  if (!candidate) {
+    setCustomSymbolStatus("Enter a valid ticker, tick size, and $/tick.");
+    return;
+  }
+  if (SYMBOL_OPTIONS.includes(candidate.ticker) || state.customSymbols.some((item) => item.ticker === candidate.ticker)) {
+    setCustomSymbolStatus("Ticker already exists.");
+    return;
+  }
+  state.customSymbols.push(candidate);
+  tickerInput.value = "";
+  tickSizeInput.value = "";
+  tickValueInput.value = "";
+  setCustomSymbolStatus(`Added ${candidate.ticker}.`);
+  rerender();
+  closeCustomSymbolModal();
+}
+
 function exportBackup() {
   const payload = { version: 6, exportedAt: new Date().toISOString(), data: state };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1070,6 +1153,7 @@ function importBackupFile(file) {
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
       state.sessions = migrated.sessions.map(normalizeSession);
+      state.customSymbols = Array.isArray(migrated.customSymbols) ? migrated.customSymbols.map(normalizeCustomSymbol).filter(Boolean) : [];
       rerender();
     } catch (err) {
       alert(`Import failed: ${err.message}`);
@@ -1083,6 +1167,7 @@ function resetToDemo() {
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions);
+  state.customSymbols = [];
   rerender();
 }
 
@@ -1186,6 +1271,14 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
 document.getElementById("addSessionBtn").addEventListener("click", addSession);
 document.getElementById("addRuleBtn").addEventListener("click", addRule);
 document.getElementById("addSetupBtn").addEventListener("click", addSetup);
+document.getElementById("openCustomSymbolModalBtn").addEventListener("click", openCustomSymbolModal);
+document.getElementById("addCustomSymbolBtn").addEventListener("click", addCustomSymbol);
+document.getElementById("customSymbolList").addEventListener("click", (e) => {
+  const delSymbol = e.target.dataset.delSymbol;
+  if (!delSymbol) return;
+  state.customSymbols = state.customSymbols.filter((item) => item.ticker !== delSymbol);
+  rerender();
+});
 document.getElementById("exportBtn").addEventListener("click", exportBackup);
 document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importInput").click());
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
@@ -1320,6 +1413,10 @@ document.getElementById("removeLinkBtn").addEventListener("click", () => {
 
 document.getElementById("linkModal").addEventListener("click", (e) => {
   if (e.target.matches("[data-close-link-modal]")) closeLinkModal();
+});
+
+document.getElementById("customSymbolModal").addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-symbol-modal]")) closeCustomSymbolModal();
 });
 
 
