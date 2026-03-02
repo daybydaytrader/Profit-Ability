@@ -681,3 +681,8 @@ button { cursor: pointer; font-weight: 600; }
   justify-content: space-between;
   align-items: center;
 }
+
+#accountModalCreateGroupWrap {
+  display: grid;
+  gap: 10px;
+}

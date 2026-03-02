@@ -72,6 +72,7 @@ const uiState = {
   activeImageTarget: null,
   activeLinkSessionId: null,
   activePlaybookSetupId: null,
+  accountModalMode: "account",
   filters: {
     overviewAccountId: "all",
     overviewFrom: "",
@@ -212,20 +213,21 @@ function getImageTargetData(target) {
 function normalizeAccount(account) {
   const name = String(account?.name || "").trim();
   const startingBalance = Number(account?.startingBalance);
+  const maxDrawdown = Number(account?.maxDrawdown);
   return {
     id: account?.id || `acc${Date.now()}${Math.random().toString(16).slice(2, 6)}` ,
     name: name || "Account",
     startingBalance: Number.isFinite(startingBalance) && startingBalance >= 0 ? startingBalance : DEFAULT_STARTING_BALANCE,
+    maxDrawdown: Number.isFinite(maxDrawdown) && maxDrawdown >= 0 ? maxDrawdown : 0,
+    groupId: String(account?.groupId || ""),
   };
 }
 
 function normalizeGroup(group) {
   const name = String(group?.name || "").trim();
-  const multiplier = Number(group?.multiplier ?? group?.size);
   return {
     id: group?.id || `grp${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
     name: name || "Group",
-    multiplier: Number.isFinite(multiplier) && multiplier > 0 ? Math.round(multiplier) : 1,
   };
 }
 
@@ -335,14 +337,18 @@ function getGroupById(groupId) {
   return state.groups.find((group) => group.id === groupId) || null;
 }
 
+function getGroupAccountCount(groupId) {
+  return state.accounts.filter((account) => account.groupId === groupId).length;
+}
+
 function getSessionMultiplier(session) {
   const group = getGroupById(session.accountId);
-  return group ? Math.max(1, Number(group.multiplier || 1)) : 1;
+  return group ? Math.max(1, getGroupAccountCount(group.id)) : 1;
 }
 
 function accountTargetLabel(id) {
   const group = getGroupById(id);
-  if (group) return `${group.name} (Group ×${group.multiplier})`;
+  if (group) return `${group.name} (Group • ${getGroupAccountCount(group.id)} accounts)`;
   const account = getAccountById(id);
   return account?.id === id ? account.name : "Main Account";
 }
@@ -438,7 +444,7 @@ function drawEquity() {
   const group = selectedId === "all" ? null : getGroupById(selectedId);
   const account = selectedId === "all" || group ? null : getAccountById(selectedId);
   const start = group
-    ? (state.accounts[0]?.startingBalance || DEFAULT_STARTING_BALANCE) * group.multiplier
+    ? state.accounts.filter((account) => account.groupId === group.id).reduce((sum, account) => sum + account.startingBalance, 0)
     : account
       ? account.startingBalance
       : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
@@ -542,7 +548,7 @@ function accountOptions(selected = "") {
     .map((account) => `<option value="${account.id}" ${selected === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`)
     .join("");
   const groupOptionsHtml = state.groups
-    .map((group) => `<option value="${group.id}" ${selected === group.id ? "selected" : ""}>${escapeHtml(group.name)} (Group ×${group.multiplier})</option>`)
+    .map((group) => `<option value="${group.id}" ${selected === group.id ? "selected" : ""}>${escapeHtml(group.name)} (${getGroupAccountCount(group.id)} acc)</option>`)
     .join("");
   return `${accountOptionsHtml}${groupOptionsHtml}`;
 }
@@ -561,13 +567,13 @@ function renderAccounts() {
   const groupsList = document.getElementById("groupsList");
   if (list) {
     list.innerHTML = state.accounts
-      .map((account) => `<div class="account-row"><div><strong>${escapeHtml(account.name)}</strong><div class="muted small">Start: $${formatWithThousands(account.startingBalance, 0)}</div></div><button data-remove-account="${account.id}" ${state.accounts.length <= 1 ? "disabled" : ""}>Remove</button></div>`)
+      .map((account) => `<div class="account-row"><div><strong>${escapeHtml(account.name)}</strong><div class="muted small">Start: $${formatWithThousands(account.startingBalance, 0)}</div><div class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</div><div class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</div></div><button data-remove-account="${account.id}" ${state.accounts.length <= 1 ? "disabled" : ""}>Remove</button></div>`)
       .join("");
   }
   if (groupsList) {
     groupsList.innerHTML = state.groups.length
       ? state.groups
-          .map((group) => `<div class="account-row"><div><strong>${escapeHtml(group.name)}</strong><div class="muted small">Multiplier: ×${group.multiplier}</div></div><button data-remove-group="${group.id}">Remove</button></div>`)
+          .map((group) => `<div class="account-row"><div><strong>${escapeHtml(group.name)}</strong><div class="muted small">Accounts: ${getGroupAccountCount(group.id)}</div></div><button data-remove-group="${group.id}">Remove</button></div>`)
           .join("")
       : '<div class="muted small">No groups yet.</div>';
   }
@@ -1220,25 +1226,104 @@ function addSetup() {
 }
 
 
-function addAccount() {
-  const name = document.getElementById("accountNameInput").value.trim();
-  const startingBalanceRaw = document.getElementById("accountBalanceInput").value;
-  const startingBalance = Number(startingBalanceRaw || DEFAULT_STARTING_BALANCE);
-  if (!name || !Number.isFinite(startingBalance) || startingBalance < 0) return;
-  state.accounts.push({ id: `acc${Date.now()}`, name, startingBalance });
-  document.getElementById("accountNameInput").value = "";
-  document.getElementById("accountBalanceInput").value = "";
+function buildAccountSelectionOptions(selectedIds = []) {
+  return state.accounts
+    .map((account) => `<option value="${account.id}" ${selectedIds.includes(account.id) ? "selected" : ""}>${escapeHtml(account.name)}</option>`)
+    .join("");
+}
+
+function openAccountModal(mode = "account") {
+  uiState.accountModalMode = mode;
+  const title = document.getElementById("accountModalTitle");
+  const accountFields = document.getElementById("accountModalAccountFields");
+  const groupFields = document.getElementById("accountModalGroupFields");
+  const createWrap = document.getElementById("accountModalCreateGroupWrap");
+  const createGroupLabel = document.getElementById("accountModalCreateGroupMembersLabel");
+  const createGroupAccounts = document.getElementById("accountModalCreateGroupAccounts");
+  const saveBtn = document.getElementById("saveAccountBtn");
+
+  if (mode === "group") {
+    if (title) title.textContent = "Add Group";
+    if (accountFields) accountFields.hidden = true;
+    if (groupFields) groupFields.hidden = false;
+    if (createWrap) createWrap.hidden = false;
+    if (saveBtn) saveBtn.textContent = "Save Group";
+    if (createGroupLabel) createGroupLabel.firstChild.textContent = "Select existing accounts";
+    if (createGroupAccounts) createGroupAccounts.innerHTML = buildAccountSelectionOptions([]);
+    document.getElementById("groupModalNameInput").value = "";
+    document.getElementById("accountModalNewGroupNameInput").value = "";
+  } else {
+    if (title) title.textContent = "Add Account";
+    if (accountFields) accountFields.hidden = false;
+    if (groupFields) groupFields.hidden = true;
+    if (saveBtn) saveBtn.textContent = "Save Account";
+
+    const select = document.getElementById("accountModalGroupSelect");
+    if (select) {
+      const options = state.groups.length
+        ? [`<option value="">No group</option>`, ...state.groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)} (${getGroupAccountCount(group.id)} acc)</option>`), '<option value="__create__">+ Create new group</option>']
+        : ['<option value="__create__">+ Create new group</option>'];
+      select.innerHTML = options.join("");
+      select.value = state.groups.length ? "" : "__create__";
+    }
+    if (createWrap) createWrap.hidden = state.groups.length > 0;
+    if (createGroupLabel) createGroupLabel.firstChild.textContent = "Include existing accounts";
+    if (createGroupAccounts) createGroupAccounts.innerHTML = buildAccountSelectionOptions([]);
+    document.getElementById("accountModalNameInput").value = "";
+    document.getElementById("accountModalBalanceInput").value = "";
+    document.getElementById("accountModalDrawdownInput").value = "";
+    document.getElementById("accountModalNewGroupNameInput").value = "";
+  }
+
+  document.getElementById("accountDetailModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeAccountModal() {
+  document.getElementById("accountDetailModal").hidden = true;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden) document.body.style.overflow = "";
+}
+
+function saveAccountFromModal() {
+  if (uiState.accountModalMode === "group") {
+    const name = document.getElementById("groupModalNameInput").value.trim();
+    if (!name) return;
+    const selected = Array.from(document.getElementById("accountModalCreateGroupAccounts").selectedOptions).map((opt) => opt.value);
+    const group = normalizeGroup({ id: `grp${Date.now()}`, name });
+    state.groups.push(group);
+    state.accounts.forEach((account) => {
+      if (selected.includes(account.id)) account.groupId = group.id;
+    });
+    closeAccountModal();
+    rerender();
+    return;
+  }
+
+  const name = document.getElementById("accountModalNameInput").value.trim();
+  const startingBalance = Number(document.getElementById("accountModalBalanceInput").value || DEFAULT_STARTING_BALANCE);
+  const maxDrawdown = Number(document.getElementById("accountModalDrawdownInput").value || 0);
+  if (!name || !Number.isFinite(startingBalance) || startingBalance < 0 || !Number.isFinite(maxDrawdown) || maxDrawdown < 0) return;
+
+  let groupId = document.getElementById("accountModalGroupSelect").value;
+  if (groupId === "__create__") {
+    const groupName = document.getElementById("accountModalNewGroupNameInput").value.trim() || `${name} Group`;
+    const created = normalizeGroup({ id: `grp${Date.now()}`, name: groupName });
+    state.groups.push(created);
+    groupId = created.id;
+
+    const selectedExisting = Array.from(document.getElementById("accountModalCreateGroupAccounts").selectedOptions).map((opt) => opt.value);
+    state.accounts.forEach((account) => {
+      if (selectedExisting.includes(account.id)) account.groupId = created.id;
+    });
+  }
+
+  state.accounts.push(normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: groupId || "" }));
+  closeAccountModal();
   rerender();
 }
 
 function addGroup() {
-  const name = document.getElementById("groupNameInput").value.trim();
-  const multiplier = Number(document.getElementById("groupSizeInput").value || 1);
-  if (!name || !Number.isFinite(multiplier) || multiplier < 1) return;
-  state.groups.push({ id: `grp${Date.now()}`, name, multiplier: Math.round(multiplier) });
-  document.getElementById("groupNameInput").value = "";
-  document.getElementById("groupSizeInput").value = "";
-  rerender();
+  openAccountModal("group");
 }
 
 function setCustomSymbolStatus(message) {
@@ -1455,7 +1540,19 @@ document.getElementById("exportBtn").addEventListener("click", exportBackup);
 document.getElementById("importBtn").addEventListener("click", () => document.getElementById("importInput").click());
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
 document.getElementById("resetBtn").addEventListener("click", resetToDemo);
-document.getElementById("addAccountBtn").addEventListener("click", addAccount);
+document.getElementById("addAccountBtn").addEventListener("click", openAccountModal);
+document.getElementById("saveAccountBtn").addEventListener("click", saveAccountFromModal);
+document.getElementById("accountModalGroupSelect").addEventListener("change", (e) => {
+  const wrap = document.getElementById("accountModalCreateGroupWrap");
+  if (wrap) wrap.hidden = e.target.value !== "__create__";
+  if (e.target.value === "__create__") {
+    const createGroupAccounts = document.getElementById("accountModalCreateGroupAccounts");
+    if (createGroupAccounts) createGroupAccounts.innerHTML = buildAccountSelectionOptions([]);
+  }
+});
+document.getElementById("accountDetailModal").addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-account-modal]")) closeAccountModal();
+});
 document.getElementById("addGroupBtn").addEventListener("click", addGroup);
 
 [["equityAccountFilter","overviewAccountId"],["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalAccountFilter","journalAccountId"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]].forEach(([id,key]) => {
@@ -1806,6 +1903,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   closeImageModal();
   closeLinkModal();
+  closeAccountModal();
   const playbookModal = document.getElementById("playbookDetailModal");
   if (playbookModal && !playbookModal.hidden) playbookModal.hidden = true;
 });
