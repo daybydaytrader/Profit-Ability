@@ -75,6 +75,7 @@ const uiState = {
   pendingAccountGroupId: "",
   groupPickerSelectedId: "",
   groupBuilderSelection: [],
+  editingGroupId: null,
   filters: {
     overviewAccountId: "all",
     overviewFrom: "",
@@ -303,12 +304,12 @@ function loadState() {
   const customSymbols = Array.isArray(parsed.customSymbols) ? parsed.customSymbols.map(normalizeCustomSymbol).filter(Boolean) : [];
   const legacyStart = Number(parsed.accountStart);
   const legacyAccount = { id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE };
-  const accounts = (Array.isArray(parsed.accounts) && parsed.accounts.length ? parsed.accounts : [legacyAccount]).map(normalizeAccount);
+  const accounts = (Array.isArray(parsed.accounts) ? parsed.accounts : [legacyAccount]).map(normalizeAccount);
   const groups = (Array.isArray(parsed.groups) ? parsed.groups : []).map(normalizeGroup);
   const accountIds = new Set(accounts.map((a) => a.id));
   const groupIds = new Set(groups.map((g) => g.id));
   sessions.forEach((session) => {
-    if (!accountIds.has(session.accountId) && !groupIds.has(session.accountId)) session.accountId = accounts[0].id;
+    if (!accountIds.has(session.accountId) && !groupIds.has(session.accountId)) session.accountId = accounts[0]?.id || "";
   });
   return {
     accounts,
@@ -409,6 +410,15 @@ function getSessionNet(session) {
 
 function getSessionTotalNet(session) {
   return getSessionNet(session) * getSessionMultiplier(session);
+}
+
+function getAccountCurrentEquity(accountId) {
+  const account = state.accounts.find((item) => item.id === accountId);
+  if (!account) return 0;
+  const net = state.sessions
+    .filter((session) => session.accountId === accountId)
+    .reduce((sum, session) => sum + getSessionNet(session), 0);
+  return account.startingBalance + net;
 }
 
 function getSessionRuleAdherence(session) {
@@ -568,9 +578,11 @@ function renderAccounts() {
   const list = document.getElementById("accountsList");
   const groupsList = document.getElementById("groupsList");
   if (list) {
-    list.innerHTML = state.accounts
-      .map((account) => `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span></div><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p></article>`)
-      .join("");
+    list.innerHTML = state.accounts.length
+      ? state.accounts
+          .map((account) => `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span></div><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p></article>`)
+          .join("")
+      : '<div class="muted small">No accounts yet.</div>';
   }
   if (groupsList) {
     groupsList.innerHTML = state.groups.length
@@ -694,7 +706,7 @@ function renderJournal() {
           <label>Date
             <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
           </label>
-          <label>Account
+          <label>Environment
             <select data-session-k="accountId" data-session-id="${s.id}">${accountOptions(s.accountId)}</select>
           </label>
           <div class="session-link-wrap">
@@ -1187,7 +1199,8 @@ function addSession() {
       mistakes: "",
       correctDecisions: "",
       rules: {},
-      accountId: state.accounts[0]?.id || DEFAULT_ACCOUNT_ID,
+      accountId: state.accounts[0]?.id || "",
+      collapsed: true,
       trades: [],
     })
   );
@@ -1294,7 +1307,12 @@ function refreshGroupBuilderLists() {
   const available = document.getElementById("groupBuilderAvailable");
   const selected = document.getElementById("groupBuilderSelected");
   if (!available || !selected) return;
-  const pool = state.accounts.filter((account) => !account.groupId || uiState.groupBuilderSelection.includes(account.id));
+  const pool = state.accounts.filter((account) => {
+    if (!account.groupId) return true;
+    if (uiState.groupBuilderSelection.includes(account.id)) return true;
+    if (uiState.editingGroupId && account.groupId === uiState.editingGroupId) return true;
+    return false;
+  });
   const availableIds = pool.map((a) => a.id).filter((id) => !uiState.groupBuilderSelection.includes(id));
   available.innerHTML = availableIds.map((id) => {
     const acc = state.accounts.find((a) => a.id === id);
@@ -1336,9 +1354,16 @@ function wireGroupBuilderDnD(selectEl, toSelected) {
   });
 }
 
-function openGroupBuilderModal() {
-  uiState.groupBuilderSelection = [];
-  document.getElementById("groupBuilderNameInput").value = "";
+function openGroupBuilderModal(editGroupId = null) {
+  uiState.editingGroupId = editGroupId;
+  if (editGroupId) {
+    const group = getGroupById(editGroupId);
+    uiState.groupBuilderSelection = state.accounts.filter((a) => a.groupId === editGroupId).map((a) => a.id);
+    document.getElementById("groupBuilderNameInput").value = group?.name || "";
+  } else {
+    uiState.groupBuilderSelection = [];
+    document.getElementById("groupBuilderNameInput").value = "";
+  }
   refreshGroupBuilderLists();
   document.getElementById("groupBuilderModal").hidden = false;
   document.body.style.overflow = "hidden";
@@ -1352,8 +1377,18 @@ function closeGroupBuilderModal() {
 function saveGroupFromBuilder() {
   const name = document.getElementById("groupBuilderNameInput").value.trim();
   if (!name) return;
-  const group = normalizeGroup({ id: `grp${Date.now()}`, name });
-  state.groups.push(group);
+  let group;
+  if (uiState.editingGroupId) {
+    group = state.groups.find((g) => g.id === uiState.editingGroupId);
+    if (!group) return;
+    group.name = name;
+  } else {
+    group = normalizeGroup({ id: `grp${Date.now()}`, name });
+    state.groups.push(group);
+  }
+  state.accounts.forEach((account) => {
+    if (account.groupId === group.id && !uiState.groupBuilderSelection.includes(account.id)) account.groupId = "";
+  });
   state.accounts.forEach((account) => {
     if (uiState.groupBuilderSelection.includes(account.id)) account.groupId = group.id;
   });
@@ -1558,6 +1593,46 @@ function closeAccountEntityModal() {
   if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden) document.body.style.overflow = "";
 }
 
+function openAccountEntityModal(type, id) {
+  const title = document.getElementById("accountEntityTitle");
+  const body = document.getElementById("accountEntityBody");
+  const actions = document.getElementById("accountEntityActions");
+  if (!title || !body || !actions) return;
+  if (type === "account") {
+    const account = state.accounts.find((a) => a.id === id);
+    if (!account) return;
+    title.textContent = account.name;
+    body.innerHTML = `<label>Title<input id="entityAccountNameInput" value="${escapeHtml(account.name)}" /></label><label>Starting equity<input id="entityAccountStartInput" type="number" min="0" step="100" value="${account.startingBalance}" /></label><label>Max drawdown<input id="entityAccountMaxDdInput" type="number" min="0" step="100" value="${account.maxDrawdown || 0}" /></label><label>Group<select id="entityAccountGroupSelect"><option value="">No group</option>${state.groups.map((g) => `<option value="${g.id}" ${account.groupId === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`).join("")}</select></label><p class="muted small">Current equity: $${formatWithThousands(getAccountCurrentEquity(account.id), 0)}</p>`;
+    actions.innerHTML = `<button type="button" id="saveEntityAccountBtn">Save</button><button type="button" class="danger" id="removeEntityAccountBtn">Remove</button>`;
+    document.getElementById("saveEntityAccountBtn").onclick = () => {
+      account.name = document.getElementById("entityAccountNameInput").value.trim() || account.name;
+      account.startingBalance = Math.max(0, Number(document.getElementById("entityAccountStartInput").value || account.startingBalance));
+      account.maxDrawdown = Math.max(0, Number(document.getElementById("entityAccountMaxDdInput").value || account.maxDrawdown || 0));
+      account.groupId = document.getElementById("entityAccountGroupSelect").value;
+      rerender();
+      closeAccountEntityModal();
+    };
+    document.getElementById("removeEntityAccountBtn").onclick = () => {
+      const fallback = state.accounts.find((a) => a.id !== account.id)?.id;
+      state.accounts = state.accounts.filter((a) => a.id !== account.id);
+      state.sessions.forEach((s) => { if (s.accountId === account.id) s.accountId = fallback || ""; });
+      rerender();
+      closeAccountEntityModal();
+    };
+  } else {
+    closeAccountEntityModal();
+    openGroupBuilderModal(id);
+    return;
+  }
+  document.getElementById("accountEntityModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeAccountEntityModal() {
+  document.getElementById("accountEntityModal").hidden = true;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden) document.body.style.overflow = "";
+}
+
 function setCustomSymbolStatus(message) {
   const status = document.getElementById("customSymbolStatus");
   if (status) status.textContent = message;
@@ -1610,7 +1685,7 @@ function importBackupFile(file) {
       const migrated = migrateLegacyToSessions(imported);
       if (!Array.isArray(migrated?.sessions) || !Array.isArray(migrated?.rules)) throw new Error("Invalid backup format.");
       const legacyStart = Number(migrated.accountStart);
-      state.accounts = (Array.isArray(migrated.accounts) && migrated.accounts.length ? migrated.accounts : [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE }]).map(normalizeAccount);
+      state.accounts = (Array.isArray(migrated.accounts) ? migrated.accounts : [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE }]).map(normalizeAccount);
       state.groups = (Array.isArray(migrated.groups) ? migrated.groups : []).map(normalizeGroup);
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
@@ -1746,7 +1821,7 @@ document.getElementById("accountsList").addEventListener("click", (e) => {
 document.getElementById("groupsList").addEventListener("click", (e) => {
   const groupId = e.target.closest("[data-open-group]")?.dataset.openGroup;
   if (!groupId) return;
-  openAccountEntityModal("group", groupId);
+  openGroupBuilderModal(groupId);
 });
 
 document.getElementById("customSymbolList").addEventListener("click", (e) => {
