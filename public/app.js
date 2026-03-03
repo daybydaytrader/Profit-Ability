@@ -1,4 +1,5 @@
-const STORAGE_KEY = "trading_dashboard_state_v3";
+const STORAGE_KEY = "trading_dashboard_state";
+const LEGACY_STORAGE_KEYS = ["trading_dashboard_state_v3", "trading_dashboard_state_v2", "trading_dashboard_state_v1"];
 const SESSION_TEXT_MAX = 300;
 const DEFAULT_STARTING_BALANCE = 50000;
 const DEFAULT_ACCOUNT_ID = "acc1";
@@ -292,7 +293,8 @@ function migrateLegacyToSessions(raw) {
 }
 
 function loadState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const availableKey = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS].find((key) => localStorage.getItem(key));
+  const raw = availableKey ? localStorage.getItem(availableKey) : null;
   let parsed;
   try {
     parsed = raw ? JSON.parse(raw) : structuredClone(seed);
@@ -331,6 +333,9 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  LEGACY_STORAGE_KEYS.forEach((key) => {
+    if (key !== STORAGE_KEY) localStorage.removeItem(key);
+  });
   document.getElementById("saveStatus").textContent = `Saved locally • ${new Date().toLocaleString()}`;
 }
 
