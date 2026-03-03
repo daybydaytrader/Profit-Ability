@@ -364,7 +364,8 @@ function getTradeAccountTargetId(trade, session) {
 function getTradeMultiplier(trade, session) {
   const targetId = getTradeAccountTargetId(trade, session);
   const group = getGroupById(targetId);
-  return group ? Math.max(1, getGroupAccountCount(group.id)) : 1;
+  if (!group) return 1;
+  return getGroupAccountCount(group.id);
 }
 
 function calcTradeNet(trade, session) {
@@ -427,7 +428,10 @@ function getAllTrades() {
 }
 
 function getSessionNet(session) {
-  return session.trades.reduce((acc, t) => acc + calcTradeNet(t, session), 0);
+  return session.trades.reduce((acc, trade) => {
+    const tradeNet = calcTradePnl(trade) * getTradeMultiplier(trade, session);
+    return acc + tradeNet;
+  }, 0);
 }
 
 function getSessionTotalNet(session) {
@@ -753,7 +757,7 @@ function renderJournal() {
             ${s.screenshot ? `<button type="button" class="session-shot" data-shot-preview="${s.id}" title="Open screenshot"><img src="${escapeHtml(s.screenshot)}" alt="Session screenshot"/><span class="shot-corner-arrow" data-upload-shot="${s.id}" title="Change screenshot">↗</span></button>` : `<button type="button" class="session-shot session-shot-empty" data-upload-shot="${s.id}">Add screenshot</button>`}
           </div>
           <div class="net-result-wrap">
-            <div class="muted">Net</div>
+            <div class="muted">Net PnL</div>
             <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">$${net.toFixed(2)}</div>
             <div class="muted small">Sum of all trade PnL × accounts traded.</div>
             <div class="adherence-badge ${adherence !== null && adherence >= 75 ? "good" : "bad"}">Rule Adherence: ${adherence === null ? "N/A" : `${adherence.toFixed(0)}%`}</div>
