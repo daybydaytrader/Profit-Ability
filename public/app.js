@@ -667,6 +667,16 @@ function getYoutubeThumbnail(url) {
   return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : "";
 }
 
+function getSafeExternalUrl(url) {
+  try {
+    const parsed = new URL(String(url || "").trim());
+    if (!["http:", "https:"].includes(parsed.protocol)) return "";
+    return parsed.href;
+  } catch {
+    return "";
+  }
+}
+
 async function getYoutubeTitle(url) {
   try {
     const endpoint = `https://noembed.com/embed?url=${encodeURIComponent(url)}`;
@@ -710,7 +720,7 @@ function renderJournal() {
             <select data-session-k="accountId" data-session-id="${s.id}">${accountOptions(s.accountId)}</select>
           </label>
           <div class="session-link-wrap">
-            ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty" data-open-link="${s.id}">Add Link</button>`}
+            ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="session-link-play" data-play-link="${s.id}" title="Open video" aria-label="Open YouTube video">▶</span><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty" data-open-link="${s.id}">Add Link</button>`}
           </div>
           <label class="field-with-counter">Mistakes
             <textarea class="session-input session-expandable" data-expandable data-session-k="mistakes" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.mistakes || "")}</textarea>
@@ -1781,6 +1791,14 @@ document.getElementById("sessionList").addEventListener("change", (e) => {
 });
 
 document.getElementById("sessionList").addEventListener("click", (e) => {
+  const playLinkId = e.target.closest("[data-play-link]")?.dataset.playLink;
+  if (playLinkId) {
+    const session = state.sessions.find((s) => s.id === playLinkId);
+    const url = getSafeExternalUrl(session?.videoLink?.url);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+
   const addTradeSessionId = e.target.dataset.addTrade;
   if (addTradeSessionId) {
     addTradeToSession(addTradeSessionId);
