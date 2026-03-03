@@ -767,7 +767,7 @@ function renderJournal() {
             <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
           </label>
           <div class="session-top-actions">
-            <button class="danger" data-del-session="${s.id}">Delete Session</button>
+            <button class="danger session-delete-btn" data-del-session="${s.id}">Delete Session</button>
             <input type="file" accept="image/*" hidden data-session-shot-input="${s.id}" />
           </div>
         </div>
