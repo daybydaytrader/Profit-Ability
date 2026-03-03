@@ -831,9 +831,10 @@ function renderPlaybook() {
         <article class="playbook-card" data-open-playbook="${setup.id}">
           <div class="playbook-card-head">
             <h4>${escapeHtml(setup.title)}</h4>
-            <button type="button" data-remove-setup="${setup.id}">Remove</button>
+            <span class="pill">Setup</span>
           </div>
-          <p class="muted">${setup.confluences ? escapeHtml(setup.confluences.slice(0, 120)) : "No confluences added yet."}</p>
+          <p class="muted small"><strong>Name:</strong> ${escapeHtml(setup.title)}</p>
+          <p class="muted small"><strong>Confluences:</strong> ${setup.confluences ? escapeHtml(setup.confluences) : "No confluences added yet."}</p>
           <div class="playbook-shot-wrap">
             ${setup.perfectSetup ? `<button type="button" class="session-shot" data-shot-preview-playbook="${setup.id}"><img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/></button>` : `<div class="session-shot session-shot-empty">No screenshot</div>`}
           </div>
@@ -850,6 +851,12 @@ function renderPlaybookModalShot(setup) {
   shotBtn.innerHTML = setup?.perfectSetup
     ? `<img src="${escapeHtml(setup.perfectSetup)}" alt="Perfect setup screenshot"/><span class="shot-corner-arrow" data-upload-playbook-shot="1">↗</span>`
     : "Add screenshot";
+}
+
+function togglePlaybookRemoveButton() {
+  const removeBtn = document.getElementById("removePlaybookSetupBtn");
+  if (!removeBtn) return;
+  removeBtn.hidden = !uiState.activePlaybookSetupId;
 }
 
 function renderMistakes() {
@@ -1314,6 +1321,7 @@ function addSetup() {
   document.getElementById("playbookModalTitleInput").value = setup.title;
   document.getElementById("playbookModalConfluencesInput").value = "";
   renderPlaybookModalShot(setup);
+  togglePlaybookRemoveButton();
   document.getElementById("playbookDetailModal").hidden = false;
   document.body.style.overflow = "hidden";
 }
@@ -2256,6 +2264,7 @@ function removePlaybookSetup(setupId) {
   });
   if (uiState.activePlaybookSetupId === setupId) {
     uiState.activePlaybookSetupId = null;
+    togglePlaybookRemoveButton();
     const modal = document.getElementById("playbookDetailModal");
     if (modal) modal.hidden = true;
     if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
@@ -2285,6 +2294,7 @@ document.getElementById("playbookList").addEventListener("click", (e) => {
   document.getElementById("playbookModalTitleInput").value = setup.title;
   document.getElementById("playbookModalConfluencesInput").value = setup.confluences || "";
   renderPlaybookModalShot(setup);
+  togglePlaybookRemoveButton();
   document.getElementById("playbookDetailModal").hidden = false;
   document.body.style.overflow = "hidden";
 });
@@ -2324,8 +2334,11 @@ document.getElementById("playbookDetailModal").addEventListener("click", (e) => 
   if (e.target.matches("[data-close-playbook-modal]")) {
     document.getElementById("playbookDetailModal").hidden = true;
     uiState.activePlaybookSetupId = null;
+    togglePlaybookRemoveButton();
     if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
   }
 });
+
+togglePlaybookRemoveButton();
 
 rerender();
