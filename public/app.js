@@ -74,7 +74,8 @@ const uiState = {
   activeLinkSessionId: null,
   activePlaybookSetupId: null,
   activeRuleId: null,
-  activeDeleteSessionId: null,
+  activeDeleteEntity: null,
+  deletionHistory: [],
   pendingAccountGroupId: "",
   groupPickerSelectedId: "",
   groupBuilderSelection: [],
@@ -103,6 +104,42 @@ const uiState = {
     selectedTextId: null,
   },
 };
+
+function pushDeletionHistory(entry) {
+  uiState.deletionHistory.push(entry);
+  if (uiState.deletionHistory.length > 50) uiState.deletionHistory.shift();
+  renderUndoState();
+}
+
+function undoLastDeletion() {
+  const entry = uiState.deletionHistory.pop();
+  if (!entry) return;
+  if (entry.type === "session") {
+    state.sessions.splice(entry.index, 0, entry.session);
+  } else if (entry.type === "setup") {
+    state.playbook.splice(entry.index, 0, entry.setup);
+  } else if (entry.type === "account") {
+    state.accounts.splice(entry.index, 0, entry.account);
+    state.sessions.forEach((session) => {
+      if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.account.id;
+    });
+  } else if (entry.type === "group") {
+    state.groups.splice(entry.index, 0, entry.group);
+    state.accounts.forEach((account) => {
+      if (entry.memberAccountIds.includes(account.id)) account.groupId = entry.group.id;
+    });
+    state.sessions.forEach((session) => {
+      if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.group.id;
+    });
+  }
+  rerender();
+}
+
+function renderUndoState() {
+  const undoBtn = document.getElementById("undoDeleteBtn");
+  if (!undoBtn) return;
+  undoBtn.hidden = uiState.deletionHistory.length === 0;
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -748,10 +785,7 @@ function renderJournal() {
           <label>Date
             <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
           </label>
-          <label>Environment
-            <select data-session-k="accountId" data-session-id="${s.id}">${accountOptions(s.accountId)}</select>
-          </label>
-          <div class="session-link-wrap">
+                    <div class="session-link-wrap">
             ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="session-link-play" data-play-link="${s.id}" title="Open video" aria-label="Open YouTube video">▶</span><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty" data-open-link="${s.id}">Add Link</button>`}
           </div>
           <label class="field-with-counter">Mistakes
@@ -840,7 +874,7 @@ function renderPlaybook() {
         <article class="playbook-card" data-open-playbook="${setup.id}">
           <div class="playbook-card-head">
             <h4>${escapeHtml(setup.title)}</h4>
-            <span class="pill">Setup</span>
+            <div><span class="pill">Setup</span> <button type="button" class="danger" data-remove-setup="${setup.id}">Remove</button></div>
           </div>
           <p class="muted small"><strong>Name:</strong> ${escapeHtml(setup.title)}</p>
           <p class="muted small"><strong>Confluences:</strong> ${setup.confluences ? escapeHtml(setup.confluences) : "No confluences added yet."}</p>
@@ -1283,6 +1317,7 @@ function rerender() {
   renderPlaybook();
   renderMistakes();
   renderAccounts();
+  renderUndoState();
 }
 
 function addSession() {
@@ -1517,13 +1552,7 @@ function openAccountEntityModal(type, id) {
       rerender();
       closeAccountEntityModal();
     };
-    document.getElementById("removeEntityAccountBtn").onclick = () => {
-      const fallback = state.accounts.find((a) => a.id !== account.id)?.id;
-      state.accounts = state.accounts.filter((a) => a.id !== account.id);
-      state.sessions.forEach((s) => { if (s.accountId === account.id) s.accountId = fallback || ""; });
-      rerender();
-      closeAccountEntityModal();
-    };
+    document.getElementById("removeEntityAccountBtn").onclick = () => { closeAccountEntityModal(); openDeleteEntityModal("account", account.id); };
   } else {
     closeAccountEntityModal();
     openGroupBuilderModal(id);
@@ -1535,24 +1564,121 @@ function openAccountEntityModal(type, id) {
 
 function closeAccountEntityModal() {
   document.getElementById("accountEntityModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteSessionModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteEntityModal").hidden) document.body.style.overflow = "";
 }
 
-function openDeleteSessionModal(sessionId) {
-  const session = state.sessions.find((item) => item.id === sessionId);
-  if (!session) return;
-  uiState.activeDeleteSessionId = sessionId;
-  const dateLabel = session.date || "(no date)";
-  document.getElementById("deleteSessionPrompt").textContent = "Are you sure you want to delete this session?";
-  document.getElementById("deleteSessionDate").textContent = `Session date: ${dateLabel}`;
-  document.getElementById("deleteSessionModal").hidden = false;
+function openDeleteEntityModal(type, id) {
+  const body = document.getElementById("deleteEntityBody");
+  if (!body) return;
+  let title = "Delete Item";
+  let infoHtml = "";
+  if (type === "setup") {
+    const setup = state.playbook.find((item) => item.id === id);
+    if (!setup) return;
+    title = "Delete Setup";
+    infoHtml = `<p><strong>Name:</strong> ${escapeHtml(setup.title)}</p><p><strong>Confluences:</strong> ${setup.confluences ? escapeHtml(setup.confluences) : "—"}</p>`;
+  }
+  if (type === "account") {
+    const account = state.accounts.find((item) => item.id === id);
+    if (!account) return;
+    title = "Delete Account";
+    infoHtml = `<p><strong>Name:</strong> ${escapeHtml(account.name)}</p><p><strong>Starting equity:</strong> $${formatWithThousands(account.startingBalance, 0)}</p><p><strong>Max drawdown:</strong> $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p><strong>Group:</strong> ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p>`;
+  }
+  if (type === "group") {
+    const group = state.groups.find((item) => item.id === id);
+    if (!group) return;
+    const members = state.accounts.filter((account) => account.groupId === group.id);
+    title = "Delete Group";
+    infoHtml = `<p><strong>Name:</strong> ${escapeHtml(group.name)}</p><p><strong>Accounts:</strong></p><ul>${members.length ? members.map((account) => `<li>${escapeHtml(account.name)}</li>`).join("") : "<li>No accounts</li>"}</ul>`;
+  }
+  if (type === "session") {
+    const session = state.sessions.find((item) => item.id === id);
+    if (!session) return;
+    title = "Delete Session";
+    infoHtml = `<p><strong>Date:</strong> ${escapeHtml(session.date || "(no date)")}</p><p><strong>Trades:</strong> ${session.trades.length}</p>`;
+  }
+  uiState.activeDeleteEntity = { type, id };
+  document.getElementById("deleteEntityTitle").textContent = title;
+  body.innerHTML = infoHtml;
+  document.getElementById("deleteEntityModal").hidden = false;
   document.body.style.overflow = "hidden";
 }
 
+function closeDeleteEntityModal() {
+  uiState.activeDeleteEntity = null;
+  document.getElementById("deleteEntityModal").hidden = true;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteEntityModal").hidden) document.body.style.overflow = "";
+}
+
+function confirmDeleteEntity() {
+  const target = uiState.activeDeleteEntity;
+  if (!target) return;
+  if (target.type === "session") {
+    const index = state.sessions.findIndex((session) => session.id === target.id);
+    if (index >= 0) {
+      pushDeletionHistory({ type: "session", session: structuredClone(state.sessions[index]), index });
+      state.sessions.splice(index, 1);
+    }
+  } else if (target.type === "setup") {
+    const index = state.playbook.findIndex((item) => item.id === target.id);
+    const setup = state.playbook[index];
+    if (index >= 0 && setup) {
+      const removedTitle = setup.title || "";
+      pushDeletionHistory({ type: "setup", setup: structuredClone(setup), index });
+      state.playbook.splice(index, 1);
+      state.sessions.forEach((session) => {
+        session.trades.forEach((trade) => {
+          if (trade.setup === removedTitle) trade.setup = "";
+        });
+      });
+      if (uiState.activePlaybookSetupId === target.id) {
+        uiState.activePlaybookSetupId = null;
+        document.getElementById("playbookDetailModal").hidden = true;
+      }
+    }
+  } else if (target.type === "account") {
+    const index = state.accounts.findIndex((account) => account.id === target.id);
+    const account = state.accounts[index];
+    if (index >= 0 && account) {
+      const fallback = state.accounts.find((item) => item.id !== target.id)?.id || "";
+      const affectedSessionIds = state.sessions.filter((session) => session.accountId === target.id).map((session) => session.id);
+      pushDeletionHistory({ type: "account", account: structuredClone(account), index, affectedSessionIds });
+      state.accounts.splice(index, 1);
+      state.sessions.forEach((session) => {
+        if (session.accountId === target.id) session.accountId = fallback;
+      });
+      if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
+      if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
+    }
+  } else if (target.type === "group") {
+    const index = state.groups.findIndex((group) => group.id === target.id);
+    const group = state.groups[index];
+    if (index >= 0 && group) {
+      const memberAccountIds = state.accounts.filter((account) => account.groupId === target.id).map((account) => account.id);
+      const fallback = state.accounts[0]?.id || "";
+      const affectedSessionIds = state.sessions.filter((session) => session.accountId === target.id).map((session) => session.id);
+      pushDeletionHistory({ type: "group", group: structuredClone(group), index, memberAccountIds, affectedSessionIds });
+      state.groups.splice(index, 1);
+      state.accounts.forEach((account) => {
+        if (account.groupId === target.id) account.groupId = "";
+      });
+      state.sessions.forEach((session) => {
+        if (session.accountId === target.id) session.accountId = fallback;
+      });
+      if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
+      if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
+    }
+  }
+  closeDeleteEntityModal();
+  rerender();
+}
+
+function openDeleteSessionModal(sessionId) {
+  openDeleteEntityModal("session", sessionId);
+}
+
 function closeDeleteSessionModal() {
-  uiState.activeDeleteSessionId = null;
-  document.getElementById("deleteSessionModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+  closeDeleteEntityModal();
 }
 
 function setCustomSymbolStatus(message) {
@@ -1740,14 +1866,7 @@ document.getElementById("addCustomSymbolBtn").addEventListener("click", addCusto
 document.getElementById("accountsList").addEventListener("click", (e) => {
   const removeId = e.target.closest("[data-remove-account]")?.dataset.removeAccount;
   if (removeId) {
-    const fallback = state.accounts.find((account) => account.id !== removeId)?.id || "";
-    state.accounts = state.accounts.filter((account) => account.id !== removeId);
-    state.sessions.forEach((session) => {
-      if (session.accountId === removeId) session.accountId = fallback;
-    });
-    if (uiState.filters.overviewAccountId === removeId) uiState.filters.overviewAccountId = "all";
-    if (uiState.filters.journalAccountId === removeId) uiState.filters.journalAccountId = "all";
-    rerender();
+    openDeleteEntityModal("account", removeId);
     return;
   }
   const accountId = e.target.closest("[data-open-account]")?.dataset.openAccount;
@@ -1757,16 +1876,7 @@ document.getElementById("accountsList").addEventListener("click", (e) => {
 document.getElementById("groupsList").addEventListener("click", (e) => {
   const removeId = e.target.closest("[data-remove-group]")?.dataset.removeGroup;
   if (removeId) {
-    state.groups = state.groups.filter((group) => group.id !== removeId);
-    state.accounts.forEach((account) => {
-      if (account.groupId === removeId) account.groupId = "";
-    });
-    state.sessions.forEach((session) => {
-      if (session.accountId === removeId) session.accountId = state.accounts[0]?.id || "";
-    });
-    if (uiState.filters.overviewAccountId === removeId) uiState.filters.overviewAccountId = "all";
-    if (uiState.filters.journalAccountId === removeId) uiState.filters.journalAccountId = "all";
-    rerender();
+    openDeleteEntityModal("group", removeId);
     return;
   }
   const groupId = e.target.closest("[data-open-group]")?.dataset.openGroup;
@@ -1852,19 +1962,14 @@ document.getElementById("sessionList").addEventListener("input", (e) => {
 });
 
 
-document.getElementById("deleteSessionModal").addEventListener("click", (e) => {
-  if (!e.target.matches("[data-close-delete-session-modal]")) return;
-  closeDeleteSessionModal();
+document.getElementById("deleteEntityModal").addEventListener("click", (e) => {
+  if (!e.target.matches("[data-close-delete-entity-modal]")) return;
+  closeDeleteEntityModal();
 });
 
-document.getElementById("cancelDeleteSessionBtn").addEventListener("click", closeDeleteSessionModal);
-
-document.getElementById("confirmDeleteSessionBtn").addEventListener("click", () => {
-  if (!uiState.activeDeleteSessionId) return;
-  state.sessions = state.sessions.filter((session) => session.id !== uiState.activeDeleteSessionId);
-  closeDeleteSessionModal();
-  rerender();
-});
+document.getElementById("cancelDeleteEntityBtn").addEventListener("click", closeDeleteEntityModal);
+document.getElementById("confirmDeleteEntityBtn").addEventListener("click", confirmDeleteEntity);
+document.getElementById("undoDeleteBtn").addEventListener("click", undoLastDeletion);
 
 
 document.getElementById("modalShotInput").addEventListener("change", (e) => {
@@ -2262,23 +2367,7 @@ document.getElementById("ruleDetailModal").addEventListener("click", (e) => {
 });
 
 function removePlaybookSetup(setupId) {
-  const setup = state.playbook.find((item) => item.id === setupId);
-  if (!setup) return;
-  const removedTitle = setup.title || "";
-  state.playbook = state.playbook.filter((item) => item.id !== setupId);
-  state.sessions.forEach((session) => {
-    session.trades.forEach((trade) => {
-      if (trade.setup === removedTitle) trade.setup = "";
-    });
-  });
-  if (uiState.activePlaybookSetupId === setupId) {
-    uiState.activePlaybookSetupId = null;
-    togglePlaybookRemoveButton();
-    const modal = document.getElementById("playbookDetailModal");
-    if (modal) modal.hidden = true;
-    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
-  }
-  rerender();
+  openDeleteEntityModal("setup", setupId);
 }
 
 document.getElementById("playbookList").addEventListener("click", (e) => {
@@ -2346,6 +2435,17 @@ document.getElementById("playbookDetailModal").addEventListener("click", (e) => 
     togglePlaybookRemoveButton();
     if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
   }
+});
+
+document.addEventListener("keydown", (e) => {
+  const isUndo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z";
+  if (!isUndo || e.shiftKey || e.altKey) return;
+  const tag = String(document.activeElement?.tagName || "").toLowerCase();
+  const typing = ["input", "textarea"].includes(tag) || document.activeElement?.isContentEditable;
+  if (typing) return;
+  if (!uiState.deletionHistory.length) return;
+  e.preventDefault();
+  undoLastDeletion();
 });
 
 togglePlaybookRemoveButton();
