@@ -92,7 +92,7 @@
             <div class="journal-controls">
               <button id="addSessionBtn">+ Add Session</button>
               <button id="openCustomSymbolModalBtn" type="button">Add Symbol</button>
-              <label>Environment
+              <label>Account
                 <select id="journalAccountFilter"></select>
               </label>
               <label>From
@@ -148,13 +148,7 @@
           <div class="panel">
             <h2>Rules</h2>
             <p class="muted">Add custom rules. They appear at the Session level in Journal.</p>
-            <div class="rule-form">
-              <input id="ruleName" placeholder="Rule name (e.g. Traded only A+ setup)" />
-              <select id="ruleType">
-                <option value="checkbox">Checkbox (yes/no)</option>
-                <option value="select">Select (multiple states)</option>
-              </select>
-              <input id="ruleOptions" placeholder="Options for select, comma-separated" />
+            <div class="rule-form rule-form-single">
               <button id="addRuleBtn">+ Add Rule</button>
             </div>
             <div id="ruleList" class="playbook-grid"></div>
@@ -253,7 +247,7 @@
       <div class="image-modal-backdrop playbook-backdrop" data-close-rule-modal></div>
       <div class="image-modal-content playbook-detail-content">
         <button class="image-modal-close" type="button" data-close-rule-modal aria-label="Close rule modal">✕</button>
-        <h3>Edit Rule</h3>
+        <h3 id="ruleDetailTitle">Edit Rule</h3>
         <label>Name
           <input id="ruleModalNameInput" type="text" />
         </label>
