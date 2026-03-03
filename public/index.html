@@ -361,6 +361,12 @@
       </div>
     </div>
 
-    <script src="app.js"></script>
+    <script>
+      (() => {
+        const script = document.createElement("script");
+        script.src = `app.js?v=${Date.now()}`;
+        document.body.appendChild(script);
+      })();
+    </script>
   </body>
 </html>
