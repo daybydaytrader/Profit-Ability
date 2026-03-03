@@ -73,6 +73,7 @@ const uiState = {
   activeLinkSessionId: null,
   activePlaybookSetupId: null,
   activeRuleId: null,
+  activeDeleteSessionId: null,
   pendingAccountGroupId: "",
   groupPickerSelectedId: "",
   groupBuilderSelection: [],
@@ -154,6 +155,7 @@ function normalizeTrade(t) {
   const symbol = String(t.symbol || "MNQ").trim().toUpperCase();
   return {
     id: t.id || `t${Date.now()}`,
+    accountId: String(t.accountId || ""),
     symbol,
     entryTime: normalizeTradeTime(t.entryTime || t.time),
     exitTime: normalizeTradeTime(t.exitTime),
@@ -311,6 +313,11 @@ function loadState() {
   const groupIds = new Set(groups.map((g) => g.id));
   sessions.forEach((session) => {
     if (!accountIds.has(session.accountId) && !groupIds.has(session.accountId)) session.accountId = accounts[0]?.id || "";
+    session.trades.forEach((trade) => {
+      const targetId = getTradeAccountTargetId(trade, session);
+      if (!accountIds.has(targetId) && !groupIds.has(targetId)) trade.accountId = session.accountId;
+      else trade.accountId = targetId;
+    });
   });
   return {
     accounts,
@@ -348,6 +355,20 @@ function getGroupAccountCount(groupId) {
 function getSessionMultiplier(session) {
   const group = getGroupById(session.accountId);
   return group ? Math.max(1, getGroupAccountCount(group.id)) : 1;
+}
+
+function getTradeAccountTargetId(trade, session) {
+  return String(trade?.accountId || session?.accountId || "");
+}
+
+function getTradeMultiplier(trade, session) {
+  const targetId = getTradeAccountTargetId(trade, session);
+  const group = getGroupById(targetId);
+  return group ? Math.max(1, getGroupAccountCount(group.id)) : 1;
+}
+
+function calcTradeNet(trade, session) {
+  return calcTradePnl(trade) * getTradeMultiplier(trade, session);
 }
 
 function accountTargetLabel(id) {
@@ -406,19 +427,20 @@ function getAllTrades() {
 }
 
 function getSessionNet(session) {
-  return session.trades.reduce((acc, t) => acc + calcTradePnl(t), 0);
+  return session.trades.reduce((acc, t) => acc + calcTradeNet(t, session), 0);
 }
 
 function getSessionTotalNet(session) {
-  return getSessionNet(session) * getSessionMultiplier(session);
+  return getSessionNet(session);
 }
 
 function getAccountCurrentEquity(accountId) {
   const account = state.accounts.find((item) => item.id === accountId);
   if (!account) return 0;
-  const net = state.sessions
-    .filter((session) => session.accountId === accountId)
-    .reduce((sum, session) => sum + getSessionNet(session), 0);
+  const net = state.sessions.reduce((sum, session) => sum + session.trades.reduce((tradeSum, trade) => {
+    const targetId = getTradeAccountTargetId(trade, session);
+    return targetId === accountId ? tradeSum + calcTradePnl(trade) : tradeSum;
+  }, 0), 0);
   return account.startingBalance + net;
 }
 
@@ -620,11 +642,13 @@ function renderSessionTrades(session) {
   const rows = session.trades
     .map((t) => {
       const pnl = calcTradePnl(t);
-      const multiplier = getSessionMultiplier(session);
+      const multiplier = getTradeMultiplier(t, session);
       const totalPnl = pnl * multiplier;
       const r = calcR(t);
+      const tradeTargetId = getTradeAccountTargetId(t, session);
       return `
       <tr>
+        <td><select data-trade-k="accountId" data-session-id="${session.id}" data-trade-id="${t.id}">${accountOptions(tradeTargetId)}</select></td>
         <td>
           <select data-trade-k="symbol" data-session-id="${session.id}" data-trade-id="${t.id}">
             ${symbolOptions.map((symbol) => `<option value="${symbol}" ${t.symbol === symbol ? "selected" : ""}>${symbol}</option>`).join("")}
@@ -647,13 +671,13 @@ function renderSessionTrades(session) {
         <td><input data-trade-k="stop" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${toNum(t.stop)}"/></td>
         <td data-trade-duration="${t.id}">${calcTradeDuration(t)}</td>
         <td data-trade-r="${t.id}">${r.toFixed(1)}</td>
-        <td data-trade-pnl="${t.id}" class="${pnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">Group: $${totalPnl.toFixed(2)}</div>` : ""}</td>
+        <td data-trade-pnl="${t.id}" class="${totalPnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">${escapeHtml(accountTargetLabel(tradeTargetId))}: $${totalPnl.toFixed(2)}</div>` : ""}</td>
         <td><button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button></td>
       </tr>`;
     })
     .join("");
 
-  return rows || `<tr><td colspan="13" class="muted">No trades yet.</td></tr>`;
+  return rows || `<tr><td colspan="14" class="muted">No trades yet.</td></tr>`;
 }
 
 function parseYoutubeId(url) {
@@ -707,8 +731,6 @@ function renderJournal() {
   const html = filteredSessions
     .map((s) => {
       const net = getSessionNet(s);
-      const multiplier = getSessionMultiplier(s);
-      const totalNet = net * multiplier;
       const adherence = getSessionRuleAdherence(s);
       return `
       <article class="session-card">
@@ -733,7 +755,7 @@ function renderJournal() {
           <div class="net-result-wrap">
             <div class="muted">Net</div>
             <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">$${net.toFixed(2)}</div>
-            ${multiplier > 1 ? `<div class="muted small">${escapeHtml(accountTargetLabel(s.accountId))}: $${totalNet.toFixed(2)}</div>` : ""}
+            <div class="muted small">Sum of all trade PnL × accounts traded.</div>
             <div class="adherence-badge ${adherence !== null && adherence >= 75 ? "good" : "bad"}">Rule Adherence: ${adherence === null ? "N/A" : `${adherence.toFixed(0)}%`}</div>
           </div>
           <label class="field-with-counter">Good Decisions
@@ -741,7 +763,7 @@ function renderJournal() {
             <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
           </label>
           <div class="session-top-actions">
-            <button data-del-session="${s.id}">Delete Session</button>
+            <button class="danger" data-del-session="${s.id}">Delete Session</button>
             <input type="file" accept="image/*" hidden data-session-shot-input="${s.id}" />
           </div>
         </div>
@@ -752,7 +774,7 @@ function renderJournal() {
           s.collapsed
             ? ""
             : `<div class="session-actions"><span class="pill">${s.trades.length} trades</span><button data-add-trade="${s.id}">+ Add Trade</button></div>
-               <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Entry Time</th><th>Exit</th><th>Exit Time</th><th>Stop</th><th>Duration</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
+               <div class="table-wrap"><table><thead><tr><th>Environment</th><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Entry Time</th><th>Exit</th><th>Exit Time</th><th>Stop</th><th>Duration</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
         }
       </article>`;
     })
@@ -1266,7 +1288,7 @@ function addSession() {
 function addTradeToSession(sessionId) {
   const session = state.sessions.find((s) => s.id === sessionId);
   if (!session) return;
-  session.trades.unshift({ id: `t${Date.now()}`, symbol: "MNQ", entryTime: "", exitTime: "", setup: "", type: "long", size: 0, entry: 0, exit: 0, stop: 1 });
+  session.trades.unshift({ id: `t${Date.now()}`, accountId: session.accountId || "", symbol: "MNQ", entryTime: "", exitTime: "", setup: "", type: "long", size: 0, entry: 0, exit: 0, stop: 1 });
   rerender();
 }
 
@@ -1496,7 +1518,24 @@ function openAccountEntityModal(type, id) {
 
 function closeAccountEntityModal() {
   document.getElementById("accountEntityModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteSessionModal").hidden) document.body.style.overflow = "";
+}
+
+function openDeleteSessionModal(sessionId) {
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  uiState.activeDeleteSessionId = sessionId;
+  const dateLabel = session.date || "(no date)";
+  document.getElementById("deleteSessionPrompt").textContent = "Are you sure you want to delete this session?";
+  document.getElementById("deleteSessionDate").textContent = `Session date: ${dateLabel}`;
+  document.getElementById("deleteSessionModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeDeleteSessionModal() {
+  uiState.activeDeleteSessionId = null;
+  document.getElementById("deleteSessionModal").hidden = true;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function setCustomSymbolStatus(message) {
@@ -1641,10 +1680,12 @@ function updateTradeComputedUI(sessionId, tradeId) {
 
   const pnlCell = document.querySelector(`[data-trade-pnl="${tradeId}"]`);
   if (pnlCell) {
-    const multiplier = getSessionMultiplier(session);
-    pnlCell.innerHTML = `$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">Group: $${(pnl * multiplier).toFixed(2)}</div>` : ""}`;
-    pnlCell.classList.toggle("good", pnl >= 0);
-    pnlCell.classList.toggle("bad", pnl < 0);
+    const multiplier = getTradeMultiplier(trade, session);
+    const totalPnl = pnl * multiplier;
+    const tradeTargetId = getTradeAccountTargetId(trade, session);
+    pnlCell.innerHTML = `$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">${escapeHtml(accountTargetLabel(tradeTargetId))}: $${totalPnl.toFixed(2)}</div>` : ""}`;
+    pnlCell.classList.toggle("good", totalPnl >= 0);
+    pnlCell.classList.toggle("bad", totalPnl < 0);
   }
 
   const durationCell = document.querySelector(`[data-trade-duration="${tradeId}"]`);
@@ -1794,6 +1835,21 @@ document.getElementById("sessionList").addEventListener("input", (e) => {
 });
 
 
+document.getElementById("deleteSessionModal").addEventListener("click", (e) => {
+  if (!e.target.matches("[data-close-delete-session-modal]")) return;
+  closeDeleteSessionModal();
+});
+
+document.getElementById("cancelDeleteSessionBtn").addEventListener("click", closeDeleteSessionModal);
+
+document.getElementById("confirmDeleteSessionBtn").addEventListener("click", () => {
+  if (!uiState.activeDeleteSessionId) return;
+  state.sessions = state.sessions.filter((session) => session.id !== uiState.activeDeleteSessionId);
+  closeDeleteSessionModal();
+  rerender();
+});
+
+
 document.getElementById("modalShotInput").addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (!file || !uiState.activeImageTarget?.id) return;
@@ -1880,8 +1936,7 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
 
   const sessionId = e.target.dataset.delSession;
   if (sessionId) {
-    state.sessions = state.sessions.filter((s) => s.id !== sessionId);
-    rerender();
+    openDeleteSessionModal(sessionId);
     return;
   }
 
@@ -2138,6 +2193,7 @@ window.addEventListener("keydown", (e) => {
   closeGroupBuilderModal();
   closeAccountEntityModal();
   closeRuleModal();
+  closeDeleteSessionModal();
   const playbookModal = document.getElementById("playbookDetailModal");
   if (playbookModal && !playbookModal.hidden) playbookModal.hidden = true;
 });
