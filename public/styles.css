@@ -156,7 +156,7 @@ button.danger {
   border-radius: 12px;
   padding: 12px;
 }
-.session-top { display: grid; gap: 12px; grid-template-columns: auto 132px minmax(190px, 210px) 88px minmax(180px,2fr) auto auto minmax(180px,2fr) auto; align-items: start; }
+.session-top { display: grid; gap: 12px; grid-template-columns: auto 132px 140px minmax(140px,1.55fr) auto auto minmax(180px,2fr) auto; align-items: start; }
 .session-top label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
 .session-rules { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
 .session-rules label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
@@ -168,13 +168,16 @@ button.danger {
 }
 .session-link-wrap {
   display: grid;
-  align-content: start;
-  width: 88px;
-  min-width: 88px;
-  justify-self: start;
+  align-content: center;
+  align-self: center;
+  width: 140px;
+  min-width: 140px;
+  justify-self: center;
 }
 .session-link-card {
   display: grid;
+  width: 140px;
+  height: 140px;
   grid-template-rows: auto 1fr;
   align-items: stretch;
 }
@@ -290,6 +293,12 @@ button.danger {
   font-weight: 700;
   color: #c6cbd7;
   background: linear-gradient(180deg, #313744, #262c36);
+}
+
+.session-shot.session-link-card,
+.session-shot-empty.session-link-card {
+  width: 140px;
+  height: 140px;
 }
 
 .session-shot-wrap {
@@ -630,6 +639,7 @@ input, select, button, textarea {
 }
 button { cursor: pointer; font-weight: 600; }
 .rule-form { display: grid; gap: 8px; grid-template-columns: 2fr 1fr 1.5fr auto; }
+.rule-form-single { grid-template-columns: auto; justify-content: start; }
 .rule-list { padding-left: 18px; }
 .pill { display: inline-block; border: 1px solid #4e5666; padding: 2px 8px; border-radius: 999px; font-size: .8rem; color: #d4d8e2; }
 

@@ -131,6 +131,15 @@ function undoLastDeletion() {
     state.sessions.forEach((session) => {
       if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.group.id;
     });
+  } else if (entry.type === "trade") {
+    const session = state.sessions.find((item) => item.id === entry.sessionId);
+    if (session) session.trades.splice(entry.index, 0, entry.trade);
+  } else if (entry.type === "rule") {
+    state.rules.splice(entry.index, 0, entry.rule);
+    state.sessions.forEach((session) => {
+      if (!session.rules) session.rules = {};
+      if (Object.hasOwn(entry.sessionValues, session.id)) session.rules[entry.rule.id] = entry.sessionValues[session.id];
+    });
   }
   rerender();
 }
@@ -786,7 +795,7 @@ function renderJournal() {
             <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
           </label>
                     <div class="session-link-wrap">
-            ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="session-link-play" data-play-link="${s.id}" title="Open video" aria-label="Open YouTube video">▶</span><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty" data-open-link="${s.id}">Add Link</button>`}
+            ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="session-link-play" data-play-link="${s.id}" title="Open video" aria-label="Open YouTube video">▶</span><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty session-link-card" data-open-link="${s.id}">Add Link</button>`}
           </div>
           <label class="field-with-counter">Mistakes
             <textarea class="session-input session-expandable" data-expandable data-session-k="mistakes" data-session-id="${s.id}" maxlength="${SESSION_TEXT_MAX}" rows="1">${escapeHtml(s.mistakes || "")}</textarea>
@@ -817,7 +826,7 @@ function renderJournal() {
           s.collapsed
             ? ""
             : `<div class="session-actions"><span class="pill">${s.trades.length} trades</span><button data-add-trade="${s.id}">+ Add Trade</button></div>
-               <div class="table-wrap"><table><thead><tr><th>Environment</th><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Entry Time</th><th>Exit</th><th>Exit Time</th><th>Stop</th><th>Duration</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
+               <div class="table-wrap"><table><thead><tr><th>Account</th><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Entry Time</th><th>Exit</th><th>Exit Time</th><th>Stop</th><th>Duration</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
         }
       </article>`;
     })
@@ -855,6 +864,8 @@ function openRuleModal(ruleId) {
   if (!rule) return;
   uiState.activeRuleId = ruleId;
   renderRuleModal(rule);
+  document.getElementById("ruleDetailTitle").textContent = "Edit Rule";
+  document.getElementById("saveRuleBtn").textContent = "Save Rule";
   document.getElementById("ruleDetailModal").hidden = false;
   document.body.style.overflow = "hidden";
 }
@@ -1344,15 +1355,14 @@ function addTradeToSession(sessionId) {
 }
 
 function addRule() {
-  const name = document.getElementById("ruleName").value.trim();
-  const type = document.getElementById("ruleType").value;
-  const optionsRaw = document.getElementById("ruleOptions").value.trim();
+  const name = document.getElementById("ruleModalNameInput").value.trim();
+  const type = document.getElementById("ruleModalTypeInput").value;
+  const optionsRaw = document.getElementById("ruleModalOptionsInput").value.trim();
   if (!name) return;
 
   const options = type === "select" ? optionsRaw.split(",").map((x) => x.trim()).filter(Boolean) : [];
   state.rules.push({ id: `r${Date.now()}`, name, type, options });
-  document.getElementById("ruleName").value = "";
-  document.getElementById("ruleOptions").value = "";
+  closeRuleModal();
   rerender();
 }
 
@@ -1597,6 +1607,19 @@ function openDeleteEntityModal(type, id) {
     title = "Delete Session";
     infoHtml = `<p><strong>Date:</strong> ${escapeHtml(session.date || "(no date)")}</p><p><strong>Trades:</strong> ${session.trades.length}</p>`;
   }
+  if (type === "trade") {
+    const session = state.sessions.find((item) => item.id === id.sessionId);
+    const trade = session?.trades.find((item) => item.id === id.tradeId);
+    if (!session || !trade) return;
+    title = "Delete Trade";
+    infoHtml = `<p><strong>Session:</strong> ${escapeHtml(session.date || "(no date)")}</p><p><strong>Symbol:</strong> ${escapeHtml(trade.symbol)}</p><p><strong>Setup:</strong> ${escapeHtml(trade.setup || "—")}</p><p><strong>PnL:</strong> $${calcTradePnl(trade).toFixed(2)}</p>`;
+  }
+  if (type === "rule") {
+    const rule = state.rules.find((item) => item.id === id);
+    if (!rule) return;
+    title = "Delete Rule";
+    infoHtml = `<p><strong>Name:</strong> ${escapeHtml(rule.name)}</p><p><strong>Type:</strong> ${escapeHtml(rule.type)}</p><p><strong>Options:</strong> ${rule.options?.length ? rule.options.map(escapeHtml).join(", ") : "—"}</p>`;
+  }
   uiState.activeDeleteEntity = { type, id };
   document.getElementById("deleteEntityTitle").textContent = title;
   body.innerHTML = infoHtml;
@@ -1667,6 +1690,30 @@ function confirmDeleteEntity() {
       });
       if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
       if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
+    }
+  } else if (target.type === "trade") {
+    const session = state.sessions.find((item) => item.id === target.id.sessionId);
+    if (session) {
+      const index = session.trades.findIndex((trade) => trade.id === target.id.tradeId);
+      if (index >= 0) {
+        pushDeletionHistory({ type: "trade", sessionId: session.id, trade: structuredClone(session.trades[index]), index });
+        session.trades.splice(index, 1);
+      }
+    }
+  } else if (target.type === "rule") {
+    const index = state.rules.findIndex((rule) => rule.id === target.id);
+    const rule = state.rules[index];
+    if (index >= 0 && rule) {
+      const sessionValues = {};
+      state.sessions.forEach((session) => {
+        if (session.rules && Object.hasOwn(session.rules, rule.id)) {
+          sessionValues[session.id] = structuredClone(session.rules[rule.id]);
+          delete session.rules[rule.id];
+        }
+      });
+      pushDeletionHistory({ type: "rule", rule: structuredClone(rule), index, sessionValues });
+      state.rules.splice(index, 1);
+      if (uiState.activeRuleId === rule.id) closeRuleModal();
     }
   }
   closeDeleteEntityModal();
@@ -1859,7 +1906,17 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
 });
 
 document.getElementById("addSessionBtn").addEventListener("click", addSession);
-document.getElementById("addRuleBtn").addEventListener("click", addRule);
+document.getElementById("addRuleBtn").addEventListener("click", () => {
+  uiState.activeRuleId = null;
+  document.getElementById("ruleModalNameInput").value = "";
+  document.getElementById("ruleModalTypeInput").value = "checkbox";
+  document.getElementById("ruleModalOptionsInput").value = "";
+  document.getElementById("ruleModalOptionsWrap").hidden = true;
+  document.getElementById("ruleDetailTitle").textContent = "Add Rule";
+  document.getElementById("saveRuleBtn").textContent = "+ Add Rule";
+  document.getElementById("ruleDetailModal").hidden = false;
+  document.body.style.overflow = "hidden";
+});
 document.getElementById("addSetupBtn").addEventListener("click", addSetup);
 document.getElementById("openCustomSymbolModalBtn").addEventListener("click", openCustomSymbolModal);
 document.getElementById("addCustomSymbolBtn").addEventListener("click", addCustomSymbol);
@@ -2065,10 +2122,7 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
   const tradeId = e.target.dataset.delTrade;
   if (tradeId) {
     const parentSessionId = e.target.dataset.sessionId;
-    const session = state.sessions.find((s) => s.id === parentSessionId);
-    if (!session) return;
-    session.trades = session.trades.filter((t) => t.id !== tradeId);
-    rerender();
+    openDeleteEntityModal("trade", { sessionId: parentSessionId, tradeId });
   }
 });
 
@@ -2323,12 +2377,7 @@ window.addEventListener("keydown", (e) => {
 document.getElementById("ruleList").addEventListener("click", (e) => {
   const rid = e.target.dataset.removeRule;
   if (rid) {
-    state.rules = state.rules.filter((r) => r.id !== rid);
-    state.sessions.forEach((s) => {
-      if (s.rules) delete s.rules[rid];
-    });
-    if (uiState.activeRuleId === rid) closeRuleModal();
-    rerender();
+    openDeleteEntityModal("rule", rid);
     return;
   }
 
@@ -2342,7 +2391,10 @@ document.getElementById("ruleModalTypeInput").addEventListener("change", (e) => 
 });
 
 document.getElementById("saveRuleBtn").addEventListener("click", () => {
-  if (!uiState.activeRuleId) return;
+  if (!uiState.activeRuleId) {
+    addRule();
+    return;
+  }
   const rule = state.rules.find((item) => item.id === uiState.activeRuleId);
   if (!rule) return;
   const name = document.getElementById("ruleModalNameInput").value.trim();
