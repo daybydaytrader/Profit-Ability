@@ -769,3 +769,27 @@ button { cursor: pointer; font-weight: 600; }
     grid-template-columns: 1fr 1fr;
   }
 }
+
+#deleteEntityBody {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #20252e;
+}
+
+#deleteEntityBody p {
+  margin: 0 0 8px;
+}
+
+#deleteEntityBody ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.undo-delete-btn {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 30;
+  border-color: #67d98d;
+}
