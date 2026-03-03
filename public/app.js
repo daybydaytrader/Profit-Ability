@@ -932,12 +932,24 @@ function renderTextOverlay() {
       const width = Math.max(80, (txt.w || 0.2) * imageRect.width);
       const height = Math.max(36, (txt.h || 0.12) * imageRect.height);
       const selected = editor.selectedTextId === txt.id ? " selected" : "";
+      const deleteButton = editor.selectedTextId === txt.id ? '<button type="button" class="text-box-delete" title="Delete text" aria-label="Delete text">×</button>' : "";
       return `<div class="text-box${selected}" data-text-id="${txt.id}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px;">
         <div class="text-box-handle" title="Drag"></div>
+        ${deleteButton}
         <textarea style="color:${escapeHtml(txt.color || editor.textColor)};">${escapeHtml(txt.text || "")}</textarea>
       </div>`;
     })
     .join("");
+}
+
+function removeEditorTextById(textId) {
+  const editor = uiState.imageEditor;
+  if (!textId || !editor.texts.some((txt) => txt.id === textId)) return;
+  pushEditorHistory();
+  editor.texts = editor.texts.filter((txt) => txt.id !== textId);
+  if (editor.selectedTextId === textId) editor.selectedTextId = null;
+  persistActiveScreenshotEdits();
+  redrawEditCanvas();
 }
 
 function redrawEditCanvas() {
@@ -1967,6 +1979,7 @@ let draggingText = null;
 textOverlay.addEventListener("pointerdown", (e) => {
   const editor = uiState.imageEditor;
   if (!editor.visible || !editor.expanded || editor.mode !== "cursor") return;
+  if (e.target.closest(".text-box-delete")) return;
   const box = e.target.closest(".text-box");
   if (!box) {
     if (editor.selectedTextId) {
@@ -2035,6 +2048,15 @@ textOverlay.addEventListener("mouseup", (e) => {
   const box = e.target.closest(".text-box");
   if (!box) return;
   updateTextFromNode(box);
+});
+textOverlay.addEventListener("click", (e) => {
+  const removeButton = e.target.closest(".text-box-delete");
+  if (!removeButton) return;
+  const box = removeButton.closest(".text-box");
+  if (!box) return;
+  e.preventDefault();
+  e.stopPropagation();
+  removeEditorTextById(box.dataset.textId);
 });
 
 window.addEventListener("resize", () => {
