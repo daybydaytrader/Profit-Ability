@@ -436,6 +436,29 @@ button.danger { border-color: #9a3f54; color: #ffd3dd; }
 .text-box.selected .text-box-handle {
   display: block;
 }
+.text-box-delete {
+  display: none;
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 95, 122, 0.95);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.text-box.selected .text-box-delete {
+  display: inline-grid;
+  place-items: center;
+}
+.text-box-delete:hover {
+  background: #ff5f7a;
+}
 .text-box.dragging {
   opacity: 0.82;
 }
