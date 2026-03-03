@@ -72,6 +72,7 @@ const uiState = {
   activeImageTarget: null,
   activeLinkSessionId: null,
   activePlaybookSetupId: null,
+  activeRuleId: null,
   pendingAccountGroupId: "",
   groupPickerSelectedId: "",
   groupBuilderSelection: [],
@@ -764,8 +765,41 @@ function renderJournal() {
 function renderRules() {
   document.getElementById("ruleList").innerHTML =
     state.rules
-      .map((r) => `<li><strong>${escapeHtml(r.name)}</strong> <span class="pill">${r.type}</span> ${r.options?.length ? `• ${r.options.map(escapeHtml).join(", ")}` : ""} <button data-remove-rule="${r.id}">Remove</button></li>`)
-      .join("") || "<li>No rules yet.</li>";
+      .map((r) => `
+        <article class="playbook-card" data-open-rule="${r.id}">
+          <div class="playbook-card-head">
+            <h4>${escapeHtml(r.name)}</h4>
+            <button type="button" data-remove-rule="${r.id}">Remove</button>
+          </div>
+          <p class="muted small"><span class="pill">${escapeHtml(r.type)}</span>${r.options?.length ? ` • ${r.options.map(escapeHtml).join(", ")}` : ""}</p>
+        </article>
+      `)
+      .join("") || '<p class="muted">No rules yet.</p>';
+}
+
+function renderRuleModal(rule) {
+  if (!rule) return;
+  document.getElementById("ruleModalNameInput").value = rule.name;
+  document.getElementById("ruleModalTypeInput").value = ["checkbox", "select"].includes(rule.type) ? rule.type : "checkbox";
+  document.getElementById("ruleModalOptionsInput").value = (rule.options || []).join(", ");
+  document.getElementById("ruleModalOptionsWrap").hidden = document.getElementById("ruleModalTypeInput").value !== "select";
+}
+
+function openRuleModal(ruleId) {
+  const rule = state.rules.find((item) => item.id === ruleId);
+  if (!rule) return;
+  uiState.activeRuleId = ruleId;
+  renderRuleModal(rule);
+  document.getElementById("ruleDetailModal").hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function closeRuleModal() {
+  document.getElementById("ruleDetailModal").hidden = true;
+  uiState.activeRuleId = null;
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("accountEntityModal").hidden) {
+    document.body.style.overflow = "";
+  }
 }
 
 function renderPlaybook() {
@@ -1094,7 +1128,7 @@ function openLinkModal(sessionId) {
 function closeLinkModal() {
   document.getElementById("linkModal").hidden = true;
   uiState.activeLinkSessionId = null;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("customSymbolModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function openCustomSymbolModal() {
@@ -1105,7 +1139,7 @@ function openCustomSymbolModal() {
 
 function closeCustomSymbolModal() {
   document.getElementById("customSymbolModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden) {
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) {
     document.body.style.overflow = "";
   }
 }
@@ -1199,7 +1233,7 @@ function closeImageModal() {
   uiState.imageEditor.blockUntil = 0;
   uiState.imageEditor.baseImage = null;
   resetImageEditorState();
-  if (document.getElementById("linkModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("customSymbolModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("linkModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function rerender() {
@@ -1282,7 +1316,7 @@ function openAccountModal() {
 
 function closeAccountModal() {
   document.getElementById("accountDetailModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function saveAccountFromModal() {
@@ -1325,7 +1359,7 @@ function openAccountGroupPickerModal() {
 
 function closeAccountGroupPickerModal() {
   document.getElementById("accountGroupPickerModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("groupBuilderModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function refreshGroupBuilderLists() {
@@ -1396,7 +1430,7 @@ function openGroupBuilderModal(editGroupId = null) {
 
 function closeGroupBuilderModal() {
   document.getElementById("groupBuilderModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("accountEntityModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function saveGroupFromBuilder() {
@@ -1462,7 +1496,7 @@ function openAccountEntityModal(type, id) {
 
 function closeAccountEntityModal() {
   document.getElementById("accountEntityModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("customSymbolModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
 }
 
 function setCustomSymbolStatus(message) {
@@ -2103,18 +2137,55 @@ window.addEventListener("keydown", (e) => {
   closeAccountGroupPickerModal();
   closeGroupBuilderModal();
   closeAccountEntityModal();
+  closeRuleModal();
   const playbookModal = document.getElementById("playbookDetailModal");
   if (playbookModal && !playbookModal.hidden) playbookModal.hidden = true;
 });
 
 document.getElementById("ruleList").addEventListener("click", (e) => {
   const rid = e.target.dataset.removeRule;
-  if (!rid) return;
-  state.rules = state.rules.filter((r) => r.id !== rid);
-  state.sessions.forEach((s) => {
-    if (s.rules) delete s.rules[rid];
+  if (rid) {
+    state.rules = state.rules.filter((r) => r.id !== rid);
+    state.sessions.forEach((s) => {
+      if (s.rules) delete s.rules[rid];
+    });
+    if (uiState.activeRuleId === rid) closeRuleModal();
+    rerender();
+    return;
+  }
+
+  const ruleId = e.target.closest("[data-open-rule]")?.dataset.openRule;
+  if (!ruleId || e.target.closest("button")) return;
+  openRuleModal(ruleId);
+});
+
+document.getElementById("ruleModalTypeInput").addEventListener("change", (e) => {
+  document.getElementById("ruleModalOptionsWrap").hidden = e.target.value !== "select";
+});
+
+document.getElementById("saveRuleBtn").addEventListener("click", () => {
+  if (!uiState.activeRuleId) return;
+  const rule = state.rules.find((item) => item.id === uiState.activeRuleId);
+  if (!rule) return;
+  const name = document.getElementById("ruleModalNameInput").value.trim();
+  const type = document.getElementById("ruleModalTypeInput").value;
+  const optionsRaw = document.getElementById("ruleModalOptionsInput").value.trim();
+  if (!name) return;
+  rule.name = name;
+  rule.type = type;
+  rule.options = type === "select" ? optionsRaw.split(",").map((item) => item.trim()).filter(Boolean) : [];
+  state.sessions.forEach((session) => {
+    if (!session.rules || !(rule.id in session.rules)) return;
+    if (type === "checkbox") session.rules[rule.id] = Boolean(session.rules[rule.id]);
+    else session.rules[rule.id] = String(session.rules[rule.id] || "");
   });
   rerender();
+  closeRuleModal();
+});
+
+document.getElementById("ruleDetailModal").addEventListener("click", (e) => {
+  if (!e.target.matches("[data-close-rule-modal]")) return;
+  closeRuleModal();
 });
 
 document.getElementById("playbookList").addEventListener("click", (e) => {
@@ -2181,7 +2252,7 @@ document.getElementById("playbookDetailModal").addEventListener("click", (e) => 
   if (e.target.matches("[data-close-playbook-modal]")) {
     document.getElementById("playbookDetailModal").hidden = true;
     uiState.activePlaybookSetupId = null;
-    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden) document.body.style.overflow = "";
+    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
   }
 });
 

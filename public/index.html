@@ -153,12 +153,11 @@
               <select id="ruleType">
                 <option value="checkbox">Checkbox (yes/no)</option>
                 <option value="select">Select (multiple states)</option>
-                <option value="text">Text note</option>
               </select>
               <input id="ruleOptions" placeholder="Options for select, comma-separated" />
               <button id="addRuleBtn">+ Add Rule</button>
             </div>
-            <ul id="ruleList" class="rule-list"></ul>
+            <div id="ruleList" class="playbook-grid"></div>
           </div>
         </section>
 
@@ -246,6 +245,29 @@
         <h3 id="accountEntityTitle">Details</h3>
         <div id="accountEntityBody"></div>
         <div class="link-modal-actions" id="accountEntityActions"></div>
+      </div>
+    </div>
+
+    <div id="ruleDetailModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-rule-modal></div>
+      <div class="image-modal-content playbook-detail-content">
+        <button class="image-modal-close" type="button" data-close-rule-modal aria-label="Close rule modal">✕</button>
+        <h3>Edit Rule</h3>
+        <label>Name
+          <input id="ruleModalNameInput" type="text" />
+        </label>
+        <label>Type
+          <select id="ruleModalTypeInput">
+            <option value="checkbox">Checkbox (yes/no)</option>
+            <option value="select">Select (multiple states)</option>
+          </select>
+        </label>
+        <label id="ruleModalOptionsWrap">Options (comma-separated)
+          <input id="ruleModalOptionsInput" type="text" placeholder="Trending, Choppy" />
+        </label>
+        <div class="link-modal-actions">
+          <button id="saveRuleBtn" type="button">Save Rule</button>
+        </div>
       </div>
     </div>
 
