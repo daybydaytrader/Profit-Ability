@@ -589,7 +589,10 @@ function renderOverview() {
   const habits = state.rules
     .map((rule) => {
       if (rule.type !== "checkbox") return null;
-      const vals = state.sessions.map((s) => s.rules?.[rule.id]).filter((x) => typeof x === "boolean");
+      const vals = state.sessions.map((session) => {
+        const value = session.rules?.[rule.id];
+        return typeof value === "boolean" ? value : false;
+      });
       const pct = vals.length ? (vals.filter(Boolean).length / vals.length) * 100 : 0;
       return { name: rule.name, pct };
     })
@@ -917,7 +920,7 @@ function renderMistakes() {
   const map = new Map();
   state.sessions.forEach((s) => {
     (s.mistakes || "")
-      .split(",")
+      .split(/(?:\r?\n|,)+/)
       .map((x) => x.trim())
       .filter(Boolean)
       .forEach((m) => map.set(m, (map.get(m) || 0) + 1));
