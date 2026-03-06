@@ -76,6 +76,10 @@
             <div class="rule-form">
               <button id="addAccountBtn">+ Add Account</button>
             </div>
+            <div class="account-tabs">
+              <button id="accountsViewActiveBtn" class="active" type="button">Active Accounts</button>
+              <button id="accountsViewPastBtn" type="button">Past Accounts</button>
+            </div>
             <div id="accountsList" class="account-list"></div>
             <h3>Account Groups</h3>
             <p class="muted small">Use groups for copy trading. Group total PnL multiplies by accounts count.</p>
@@ -203,6 +207,22 @@
         <h3>Add Account</h3>
         <label>Account name
           <input id="accountModalNameInput" type="text" placeholder="e.g. Apex 50k" />
+        </label>
+        <label>Prop firm
+          <select id="accountModalFirmInput">
+            <option value="">Custom</option>
+            <option value="TPT">TakeProfitTrader (TPT)</option>
+          </select>
+        </label>
+        <label id="accountModalTptWrap" hidden>TPT account size
+          <select id="accountModalTptSizeInput">
+            <option value="">Select size</option>
+            <option value="25000">25k · 1.5k DD</option>
+            <option value="50000">50k · 2k DD</option>
+            <option value="75000">75k · 2.5k DD</option>
+            <option value="100000">100k · 3k DD</option>
+            <option value="150000">150k · 4.5k DD</option>
+          </select>
         </label>
         <label>Starting equity
           <input id="accountModalBalanceInput" type="number" min="0" step="100" placeholder="50000" />

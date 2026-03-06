@@ -731,6 +731,34 @@ button { cursor: pointer; font-weight: 600; }
 .account-form {
   grid-template-columns: 2fr 1fr auto;
 }
+
+.account-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.account-tabs button.active {
+  border-color: #8ea2ff;
+  box-shadow: 0 0 0 1px #8ea2ff;
+}
+
+.account-thin-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #20252e;
+}
+
+.account-line {
+  font-size: 0.88rem;
+  color: #d4d8e2;
+}
+
 .account-list {
   margin-top: 10px;
   display: grid;

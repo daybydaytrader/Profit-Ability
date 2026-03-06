@@ -3,6 +3,13 @@ const LEGACY_STORAGE_KEYS = ["trading_dashboard_state_v3", "trading_dashboard_st
 const SESSION_TEXT_MAX = 300;
 const DEFAULT_STARTING_BALANCE = 50000;
 const DEFAULT_ACCOUNT_ID = "acc1";
+const TPT_ACCOUNT_OPTIONS = [
+  { equity: 25000, maxDrawdown: 1500 },
+  { equity: 50000, maxDrawdown: 2000 },
+  { equity: 75000, maxDrawdown: 2500 },
+  { equity: 100000, maxDrawdown: 3000 },
+  { equity: 150000, maxDrawdown: 4500 },
+];
 
 const SYMBOL_OPTIONS = ["NQ", "MNQ", "ES", "MES", "GC", "MGC"];
 const POINT_VALUE_BY_SYMBOL = {
@@ -15,7 +22,8 @@ const POINT_VALUE_BY_SYMBOL = {
 };
 
 const seed = {
-  accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE }],
+  accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE, createdAt: new Date().toISOString().slice(0, 10), propFirm: "" }],
+  archivedAccounts: [],
   groups: [],
   playbook: [{ id: "pb1", title: "ORB", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }, { id: "pb2", title: "Pullback", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }],
   rules: [
@@ -77,6 +85,7 @@ const uiState = {
   activeDeleteEntity: null,
   deletionHistory: [],
   pendingAccountGroupId: "",
+  accountsView: "active",
   groupPickerSelectedId: "",
   groupBuilderSelection: [],
   editingGroupId: null,
@@ -131,6 +140,9 @@ function undoLastDeletion() {
     state.sessions.forEach((session) => {
       if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.group.id;
     });
+  } else if (entry.type === "archive-account") {
+    state.archivedAccounts = state.archivedAccounts.filter((account) => account.id !== entry.account.id);
+    state.accounts.splice(entry.index, 0, normalizeAccount({ ...entry.account, archivedAt: "" }));
   } else if (entry.type === "trade") {
     const session = state.sessions.find((item) => item.id === entry.sessionId);
     if (session) session.trades.splice(entry.index, 0, entry.trade);
@@ -267,13 +279,65 @@ function normalizeAccount(account) {
   const name = String(account?.name || "").trim();
   const startingBalance = Number(account?.startingBalance);
   const maxDrawdown = Number(account?.maxDrawdown);
+  const createdAt = String(account?.createdAt || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const archivedAtRaw = String(account?.archivedAt || "").slice(0, 10);
   return {
-    id: account?.id || `acc${Date.now()}${Math.random().toString(16).slice(2, 6)}` ,
+    id: account?.id || `acc${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
     name: name || "Account",
     startingBalance: Number.isFinite(startingBalance) && startingBalance >= 0 ? startingBalance : DEFAULT_STARTING_BALANCE,
     maxDrawdown: Number.isFinite(maxDrawdown) && maxDrawdown >= 0 ? maxDrawdown : 0,
     groupId: String(account?.groupId || ""),
+    propFirm: String(account?.propFirm || ""),
+    createdAt,
+    archivedAt: archivedAtRaw,
   };
+}
+
+
+function formatAgeRange(account) {
+  const created = String(account?.createdAt || "").slice(5, 10);
+  const archived = String(account?.archivedAt || "").slice(5, 10);
+  if (created && archived) return `${created} - ${archived}`;
+  if (created) return `${created} - active`;
+  return "—";
+}
+
+function archiveAccount(accountId) {
+  const index = state.accounts.findIndex((account) => account.id === accountId);
+  const account = state.accounts[index];
+  if (index < 0 || !account) return;
+  const archivedAt = new Date().toISOString().slice(0, 10);
+  const archivedAccount = normalizeAccount({ ...account, archivedAt });
+  const fallback = state.accounts.find((item) => item.id !== accountId)?.id || "";
+  const affectedSessionIds = state.sessions.filter((session) => session.accountId === accountId).map((session) => session.id);
+  state.accounts.splice(index, 1);
+  state.archivedAccounts.unshift(archivedAccount);
+  state.sessions.forEach((session) => {
+    if (session.accountId === accountId) session.accountId = fallback;
+    session.trades.forEach((trade) => {
+      if (getTradeAccountTargetId(trade, session) === accountId) trade.accountId = session.accountId;
+    });
+  });
+  if (uiState.filters.overviewAccountId === accountId) uiState.filters.overviewAccountId = "all";
+  if (uiState.filters.journalAccountId === accountId) uiState.filters.journalAccountId = "all";
+  pushDeletionHistory({ type: "archive-account", account: structuredClone(archivedAccount), index, affectedSessionIds });
+}
+
+function restoreArchivedAccount(accountId) {
+  const index = state.archivedAccounts.findIndex((account) => account.id === accountId);
+  const account = state.archivedAccounts[index];
+  if (index < 0 || !account) return;
+  state.archivedAccounts.splice(index, 1);
+  state.accounts.push(normalizeAccount({ ...account, archivedAt: "" }));
+}
+
+function evaluateAccountDrawdowns() {
+  const blown = state.accounts.filter((account) => {
+    const currentEquity = getAccountCurrentEquity(account.id);
+    const drawdown = account.startingBalance - currentEquity;
+    return account.maxDrawdown > 0 && drawdown >= account.maxDrawdown;
+  });
+  blown.forEach((account) => archiveAccount(account.id));
 }
 
 function normalizeGroup(group) {
@@ -356,6 +420,7 @@ function loadState() {
   const legacyStart = Number(parsed.accountStart);
   const legacyAccount = { id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE };
   const accounts = (Array.isArray(parsed.accounts) ? parsed.accounts : [legacyAccount]).map(normalizeAccount);
+  const archivedAccounts = (Array.isArray(parsed.archivedAccounts) ? parsed.archivedAccounts : []).map(normalizeAccount);
   const groups = (Array.isArray(parsed.groups) ? parsed.groups : []).map(normalizeGroup);
   const accountIds = new Set(accounts.map((a) => a.id));
   const groupIds = new Set(groups.map((g) => g.id));
@@ -369,6 +434,7 @@ function loadState() {
   });
   return {
     accounts,
+    archivedAccounts,
     groups,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
@@ -426,8 +492,9 @@ function calcTradeNet(trade, session) {
 function accountTargetLabel(id) {
   const group = getGroupById(id);
   if (group) return `${group.name} (Group • ${getGroupAccountCount(group.id)} accounts)`;
-  const account = getAccountById(id);
-  return account?.id === id ? account.name : "Main Account";
+  const account = state.accounts.find((item) => item.id === id) || state.archivedAccounts.find((item) => item.id === id);
+  if (account) return account.name;
+  return "—";
 }
 
 function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
@@ -658,12 +725,25 @@ function renderFilterSelects() {
 function renderAccounts() {
   const list = document.getElementById("accountsList");
   const groupsList = document.getElementById("groupsList");
+  const activeTabBtn = document.getElementById("accountsViewActiveBtn");
+  const pastTabBtn = document.getElementById("accountsViewPastBtn");
+  if (activeTabBtn) activeTabBtn.classList.toggle("active", uiState.accountsView !== "past");
+  if (pastTabBtn) pastTabBtn.classList.toggle("active", uiState.accountsView === "past");
+
   if (list) {
-    list.innerHTML = state.accounts.length
-      ? state.accounts
-          .map((account) => `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p></article>`)
-          .join("")
-      : '<div class="muted small">No accounts yet.</div>';
+    if (uiState.accountsView === "past") {
+      list.innerHTML = state.archivedAccounts.length
+        ? state.archivedAccounts
+            .map((account) => `<article class="account-thin-card" data-open-archived-account="${account.id}"><span class="account-line"><strong>${escapeHtml(account.name)}</strong> · $${formatWithThousands(account.startingBalance, 0)} · ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "No group")} · ${escapeHtml(formatAgeRange(account))}</span><button type="button" data-restore-account="${account.id}">Restore</button></article>`)
+            .join("")
+        : '<div class="muted small">No past accounts yet.</div>';
+    } else {
+      list.innerHTML = state.accounts.length
+        ? state.accounts
+            .map((account) => `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="danger" data-blowup-account="${account.id}">Blow Up</button> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Firm: ${escapeHtml(account.propFirm || "—")}</p><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p></article>`)
+            .join("")
+        : '<div class="muted small">No active accounts yet.</div>';
+    }
   }
   if (groupsList) {
     groupsList.innerHTML = state.groups.length
@@ -1323,6 +1403,7 @@ function closeImageModal() {
 }
 
 function rerender() {
+  evaluateAccountDrawdowns();
   saveState();
   renderFilterSelects();
   renderOverview();
@@ -1396,6 +1477,9 @@ function openAccountModal() {
   document.getElementById("accountModalNameInput").value = "";
   document.getElementById("accountModalBalanceInput").value = "";
   document.getElementById("accountModalDrawdownInput").value = "";
+  document.getElementById("accountModalFirmInput").value = "";
+  document.getElementById("accountModalTptSizeInput").value = "";
+  document.getElementById("accountModalTptWrap").hidden = true;
   document.getElementById("accountModalGroupPreview").textContent = "No group selected";
   document.getElementById("accountDetailModal").hidden = false;
   document.body.style.overflow = "hidden";
@@ -1408,11 +1492,18 @@ function closeAccountModal() {
 
 function saveAccountFromModal() {
   const name = document.getElementById("accountModalNameInput").value.trim();
-  const startingBalance = Number(document.getElementById("accountModalBalanceInput").value || DEFAULT_STARTING_BALANCE);
-  const maxDrawdown = Number(document.getElementById("accountModalDrawdownInput").value || 0);
+  const propFirm = document.getElementById("accountModalFirmInput").value;
+  const tptSize = Number(document.getElementById("accountModalTptSizeInput").value || 0);
+  let startingBalance = Number(document.getElementById("accountModalBalanceInput").value || DEFAULT_STARTING_BALANCE);
+  let maxDrawdown = Number(document.getElementById("accountModalDrawdownInput").value || 0);
+  const selectedTpt = TPT_ACCOUNT_OPTIONS.find((item) => item.equity === tptSize);
+  if (propFirm === "TPT" && selectedTpt) {
+    startingBalance = selectedTpt.equity;
+    maxDrawdown = selectedTpt.maxDrawdown;
+  }
   if (!name || !Number.isFinite(startingBalance) || startingBalance < 0 || !Number.isFinite(maxDrawdown) || maxDrawdown < 0) return;
 
-  state.accounts.push(normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: uiState.pendingAccountGroupId || "" }));
+  state.accounts.push(normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: uiState.pendingAccountGroupId || "", propFirm, createdAt: new Date().toISOString().slice(0, 10) }));
   closeAccountModal();
   rerender();
 }
@@ -1924,6 +2015,18 @@ document.getElementById("addSetupBtn").addEventListener("click", addSetup);
 document.getElementById("openCustomSymbolModalBtn").addEventListener("click", openCustomSymbolModal);
 document.getElementById("addCustomSymbolBtn").addEventListener("click", addCustomSymbol);
 document.getElementById("accountsList").addEventListener("click", (e) => {
+  const restoreId = e.target.closest("[data-restore-account]")?.dataset.restoreAccount;
+  if (restoreId) {
+    restoreArchivedAccount(restoreId);
+    rerender();
+    return;
+  }
+  const blowupId = e.target.closest("[data-blowup-account]")?.dataset.blowupAccount;
+  if (blowupId) {
+    archiveAccount(blowupId);
+    rerender();
+    return;
+  }
   const removeId = e.target.closest("[data-remove-account]")?.dataset.removeAccount;
   if (removeId) {
     openDeleteEntityModal("account", removeId);
@@ -1955,7 +2058,19 @@ document.getElementById("importBtn").addEventListener("click", () => document.ge
 document.getElementById("importInput").addEventListener("change", (e) => importBackupFile(e.target.files[0]));
 document.getElementById("resetBtn").addEventListener("click", resetToDemo);
 document.getElementById("addAccountBtn").addEventListener("click", openAccountModal);
+document.getElementById("accountsViewActiveBtn").addEventListener("click", () => { uiState.accountsView = "active"; renderAccounts(); });
+document.getElementById("accountsViewPastBtn").addEventListener("click", () => { uiState.accountsView = "past"; renderAccounts(); });
 document.getElementById("saveAccountBtn").addEventListener("click", saveAccountFromModal);
+document.getElementById("accountModalFirmInput").addEventListener("change", (e) => {
+  const wrap = document.getElementById("accountModalTptWrap");
+  if (wrap) wrap.hidden = e.target.value !== "TPT";
+});
+document.getElementById("accountModalTptSizeInput").addEventListener("change", (e) => {
+  const selected = TPT_ACCOUNT_OPTIONS.find((item) => item.equity === Number(e.target.value || 0));
+  if (!selected) return;
+  document.getElementById("accountModalBalanceInput").value = selected.equity;
+  document.getElementById("accountModalDrawdownInput").value = selected.maxDrawdown;
+});
 document.getElementById("accountDetailModal").addEventListener("click", (e) => {
   if (e.target.matches("[data-close-account-modal]")) closeAccountModal();
 });
