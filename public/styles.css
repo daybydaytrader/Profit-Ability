@@ -561,6 +561,18 @@ button.danger {
 .adherence-badge.good { background: rgba(41, 177, 95, 0.22); border-color: #37cc72; }
 .adherence-badge.bad { background: rgba(199, 47, 73, 0.25); border-color: #ef5f79; }
 
+.blown-badge {
+  margin-top: 4px;
+  border-radius: 8px;
+  padding: 5px 8px;
+  border: 1px solid #f06d86;
+  background: rgba(199, 47, 73, 0.28);
+  color: #ffd9df;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .field-with-counter { position: relative; }
 .char-counter {
   position: absolute;
@@ -626,6 +638,24 @@ textarea.session-input {
   height: 260px;
   display: block;
 }
+
+.equity-legend {
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: #cdd3de;
+  font-size: 0.8rem;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-swatch {
+  width: 20px;
+  height: 3px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.legend-swatch.equity { background: #d9dde4; }
+.legend-swatch.drawdown { background: #ef5f79; }
 .table-wrap { overflow-x: auto; margin-top: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }

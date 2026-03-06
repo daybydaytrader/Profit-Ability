@@ -394,10 +394,18 @@ function restoreArchivedAccount(accountId) {
 }
 
 function evaluateAccountDrawdowns() {
+  state.sessions.forEach((session) => {
+    if (!Array.isArray(session.blownAccounts)) session.blownAccounts = [];
+  });
+
   const blown = state.accounts.filter((account) => {
-    const currentEquity = getAccountCurrentEquity(account.id);
-    const drawdown = account.startingBalance - currentEquity;
-    return account.maxDrawdown > 0 && drawdown >= account.maxDrawdown;
+    const firstHitSessionId = getFirstDrawdownHitSessionId(account);
+    if (!firstHitSessionId) return false;
+    const hitSession = state.sessions.find((session) => session.id === firstHitSessionId);
+    if (hitSession && !hitSession.blownAccounts.some((entry) => entry.accountId === account.id)) {
+      hitSession.blownAccounts.push({ accountId: account.id, accountName: account.name });
+    }
+    return true;
   });
   blown.forEach((account) => archiveAccount(account.id));
 }
@@ -459,6 +467,11 @@ function normalizeSession(session) {
       title: String(session.videoLink?.title || ""),
       thumbnail: String(session.videoLink?.thumbnail || ""),
     },
+    blownAccounts: Array.isArray(session.blownAccounts)
+      ? session.blownAccounts
+          .map((entry) => ({ accountId: String(entry?.accountId || ""), accountName: String(entry?.accountName || "") }))
+          .filter((entry) => entry.accountId)
+      : [],
     collapsed: Boolean(session.collapsed),
     trades: Array.isArray(session.trades) ? session.trades.map(normalizeTrade) : [],
   };
@@ -647,6 +660,64 @@ function getSessionNetForFilter(session, accountId = "all") {
   }, 0);
 }
 
+function getSessionNetForAccount(session, accountId) {
+  return session.trades.reduce((acc, trade) => {
+    const targetId = getTradeAccountTargetId(trade, session);
+    if (targetId !== accountId) return acc;
+    return acc + calcTradePnl(trade);
+  }, 0);
+}
+
+function getTptDrawdownContext(selectedId = "all") {
+  if (selectedId === "all") {
+    const tptAccountIds = new Set(state.accounts.filter((account) => account.propFirm === "TPT").map((account) => account.id));
+    const start = state.accounts.reduce((sum, account) => sum + account.startingBalance, 0);
+    const maxDrawdown = state.accounts.reduce((sum, account) => sum + (account.maxDrawdown || 0), 0);
+    return {
+      start,
+      maxDrawdown,
+      staticFloor: start - maxDrawdown,
+      getSessionNet: (session) => session.trades.reduce((acc, trade) => {
+        const targetId = getTradeAccountTargetId(trade, session);
+        if (!tptAccountIds.has(targetId)) return acc;
+        return acc + calcTradePnl(trade);
+      }, 0),
+    };
+  }
+
+  const group = getGroupById(selectedId);
+  if (group) {
+    const members = state.accounts.filter((account) => account.groupId === group.id);
+    const memberIds = new Set(members.map((account) => account.id));
+    const isTptGroup = members.length > 0 && members.every((account) => account.propFirm === "TPT");
+    const start = members.reduce((sum, account) => sum + account.startingBalance, 0);
+    const maxDrawdown = members.reduce((sum, account) => sum + (account.maxDrawdown || 0), 0);
+    return {
+      start,
+      maxDrawdown,
+      staticFloor: start - maxDrawdown,
+      getSessionNet: isTptGroup
+        ? (session) => session.trades.reduce((acc, trade) => {
+          const targetId = getTradeAccountTargetId(trade, session);
+          if (!memberIds.has(targetId)) return acc;
+          return acc + calcTradePnl(trade);
+        }, 0)
+        : () => 0,
+    };
+  }
+
+  const account = getAccountById(selectedId);
+  if (!account) return { start: 0, maxDrawdown: 0, staticFloor: 0, getSessionNet: () => 0 };
+  return {
+    start: account.startingBalance,
+    maxDrawdown: account.maxDrawdown || 0,
+    staticFloor: account.startingBalance - (account.maxDrawdown || 0),
+    getSessionNet: account.propFirm === "TPT"
+      ? (session) => getSessionNetForAccount(session, account.id)
+      : () => 0,
+  };
+}
+
 function calcR(trade) {
   const stop = Math.abs(toNum(trade.stop));
   if (!stop) return 0;
@@ -758,9 +829,18 @@ function drawEquity() {
       : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
   const points = [start];
   sessions.forEach((session) => points.push(points.at(-1) + getSessionNetForFilter(session, selectedId)));
+  const drawdownContext = getTptDrawdownContext(selectedId);
+  let tptRunningNet = 0;
+  let tptRunningPeak = 0;
+  const drawdownPoints = [drawdownContext.staticFloor];
+  sessions.forEach((session) => {
+    tptRunningNet += drawdownContext.getSessionNet(session);
+    tptRunningPeak = Math.max(tptRunningPeak, tptRunningNet);
+    drawdownPoints.push(drawdownContext.staticFloor + Math.max(0, tptRunningPeak));
+  });
   const labels = ["Start", ...sessions.map((session) => session.date)];
-  const min = Math.min(...points);
-  const max = Math.max(...points);
+  const min = Math.min(...points, ...drawdownPoints);
+  const max = Math.max(...points, ...drawdownPoints);
   const range = Math.max(1, max - min);
 
   const left = 64;
@@ -778,6 +858,12 @@ function drawEquity() {
     return { x, y, value };
   });
   const path = pointRows.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+  const drawdownRows = drawdownPoints.map((value, i) => {
+    const x = left + (i * chartW) / Math.max(drawdownPoints.length - 1, 1);
+    const y = top + ((max - value) / range) * chartH;
+    return { x, y };
+  });
+  const drawdownPath = drawdownRows.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
 
   const yGrid = Array.from({ length: 4 }, (_, i) => {
     const y = top + i * (chartH / 3);
@@ -787,8 +873,26 @@ function drawEquity() {
 
   const xTicks = pointRows.map((p, i) => `<text x="${p.x}" y="${h - 12}" text-anchor="middle" fill="#b6bbc6" font-size="10">${labels[i] === "Start" ? "Start" : labels[i].slice(5)}</text>`).join("");
   const dots = pointRows.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="#d9dde4"/>`).join("");
+  const drawdownDots = drawdownRows.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="2.2" fill="#ef5f79"/>`).join("");
 
-  root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Equity curve chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${yGrid}<path d="${path}" fill="none" stroke="#d9dde4" stroke-width="2.5"/>${dots}${xTicks}</svg>`;
+  root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Equity and drawdown chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${yGrid}<path d="${drawdownPath}" fill="none" stroke="#ef5f79" stroke-width="2.2"/><path d="${path}" fill="none" stroke="#d9dde4" stroke-width="2.5"/>${drawdownDots}${dots}${xTicks}</svg><div class="equity-legend"><span class="legend-item"><span class="legend-swatch equity"></span>Equity</span><span class="legend-item"><span class="legend-swatch drawdown"></span>Drawdown</span></div>`;
+}
+
+function getFirstDrawdownHitSessionId(account) {
+  if (!account?.id || !(account.maxDrawdown > 0)) return "";
+  const sessions = state.sessions.slice().sort((a, b) => a.date.localeCompare(b.date));
+  let net = 0;
+  let peakNet = 0;
+  for (const session of sessions) {
+    net += getSessionNetForAccount(session, account.id);
+    peakNet = Math.max(peakNet, net);
+    const floor = account.propFirm === "TPT"
+      ? account.startingBalance - account.maxDrawdown + Math.max(0, peakNet)
+      : account.startingBalance - account.maxDrawdown;
+    const equity = account.startingBalance + net;
+    if (equity <= floor) return session.id;
+  }
+  return "";
 }
 
 function renderOverview() {
@@ -1037,6 +1141,10 @@ function renderJournal() {
     .map((s) => {
       const net = getSessionNet(s);
       const adherence = getSessionRuleAdherence(s);
+      const blownCount = Array.isArray(s.blownAccounts) ? s.blownAccounts.length : 0;
+      const blownLabel = blownCount === 1
+        ? `Accounts Blown: ${escapeHtml(s.blownAccounts[0].accountName || "1 account")}`
+        : `Accounts Blown: ${blownCount}`;
       return `
       <article class="session-card">
         <div class="session-top">
@@ -1058,6 +1166,7 @@ function renderJournal() {
             <div class="muted">Net PnL</div>
             <div data-session-net="${s.id}" class="net-result ${net >= 0 ? "good" : "bad"}">$${net.toFixed(2)}</div>
             <div class="muted small">Sum of all trade PnL × accounts traded.</div>
+            ${blownCount ? `<div class="blown-badge">${blownLabel}</div>` : ""}
             <div class="adherence-badge ${adherence !== null && adherence >= 75 ? "good" : "bad"}">Rule Adherence: ${adherence === null ? "N/A" : `${adherence.toFixed(0)}%`}</div>
           </div>
           <label class="field-with-counter">Good Decisions
