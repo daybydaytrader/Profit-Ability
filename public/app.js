@@ -531,7 +531,7 @@ function loadState() {
     archivedGroups,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
-    sessions: sessions.length ? sessions : structuredClone(seed.sessions),
+    sessions: (sessions.length ? sessions : structuredClone(seed.sessions)).sort(compareSessionDatesDesc),
     customSymbols,
   };
 }
@@ -622,13 +622,19 @@ function accountTargetLabel(id) {
   return "—";
 }
 
+function compareSessionDatesDesc(a, b) {
+  return String(b?.date || "").localeCompare(String(a?.date || ""));
+}
+
 function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
-  return state.sessions.filter((session) => {
-    if (!sessionMatchesTarget(session, accountId)) return false;
-    if (from && session.date < from) return false;
-    if (to && session.date > to) return false;
-    return true;
-  });
+  return state.sessions
+    .filter((session) => {
+      if (!sessionMatchesTarget(session, accountId)) return false;
+      if (from && session.date < from) return false;
+      if (to && session.date > to) return false;
+      return true;
+    })
+    .sort(compareSessionDatesDesc);
 }
 
 function getSessionNetForFilter(session, accountId = "all") {
@@ -1591,6 +1597,7 @@ function addSession() {
       trades: [],
     })
   );
+  state.sessions.sort(compareSessionDatesDesc);
   rerender();
 }
 
@@ -2110,7 +2117,7 @@ function importBackupFile(file) {
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
-      state.sessions = migrated.sessions.map(normalizeSession);
+      state.sessions = migrated.sessions.map(normalizeSession).sort(compareSessionDatesDesc);
       state.customSymbols = Array.isArray(migrated.customSymbols) ? migrated.customSymbols.map(normalizeCustomSymbol).filter(Boolean) : [];
       rerender();
     } catch (err) {
@@ -2126,9 +2133,17 @@ function resetToDemo() {
   state.archivedGroups = structuredClone(seed.archivedGroups || []);
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
-  state.sessions = structuredClone(seed.sessions);
+  state.sessions = structuredClone(seed.sessions).sort(compareSessionDatesDesc);
   state.customSymbols = [];
   rerender();
+}
+
+function resetJournalFilters() {
+  uiState.filters.journalAccountId = "all";
+  uiState.filters.journalFrom = "";
+  uiState.filters.journalTo = "";
+  renderFilterSelects();
+  renderJournal();
 }
 
 function updateSessionField(target) {
@@ -2147,6 +2162,8 @@ function updateSessionField(target) {
     if (target.tagName === "TEXTAREA") session.rules[rid] = String(target.value).slice(0, SESSION_TEXT_MAX);
     else session.rules[rid] = target.value;
   }
+
+  state.sessions.sort(compareSessionDatesDesc);
 }
 
 function updateTradeField(target, formatDisplay = false) {
@@ -2232,6 +2249,7 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
 });
 
 document.getElementById("addSessionBtn").addEventListener("click", addSession);
+document.getElementById("resetJournalFiltersBtn")?.addEventListener("click", resetJournalFilters);
 document.getElementById("addRuleBtn").addEventListener("click", () => {
   uiState.activeRuleId = null;
   document.getElementById("ruleModalNameInput").value = "";
@@ -2364,6 +2382,11 @@ document.getElementById("sessionList").addEventListener("input", (e) => {
   const t = e.target;
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
+    if (t.dataset.sessionK === "date") {
+      renderJournal();
+      refreshAnalyticsOnly();
+      return;
+    }
     if (t.tagName === "TEXTAREA") updateAllCounters();
     refreshAnalyticsOnly();
   }
@@ -2405,6 +2428,11 @@ document.getElementById("sessionList").addEventListener("change", (e) => {
 
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
+    if (t.dataset.sessionK === "date") {
+      renderJournal();
+      refreshAnalyticsOnly();
+      return;
+    }
     if (t.tagName === "TEXTAREA") updateAllCounters();
     refreshAnalyticsOnly();
   }
