@@ -311,11 +311,17 @@ function getAccountSessionDateRange(accountId) {
 
 function formatAgeRange(account) {
   const { first, last } = getAccountSessionDateRange(account?.id);
-  const firstDisplay = first.slice(5, 10);
-  const lastDisplay = last.slice(5, 10);
+  const formatDate = (value) => {
+    if (!value) return "";
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+  };
+  const firstDisplay = formatDate(first);
+  const lastDisplay = formatDate(last);
   if (firstDisplay && lastDisplay) return `${firstDisplay} - ${lastDisplay}`;
   if (firstDisplay) return `${firstDisplay} - active`;
-  const created = String(account?.createdAt || "").slice(5, 10);
+  const created = formatDate(String(account?.createdAt || "").slice(0, 10));
   if (created) return `${created} - active`;
   return "—";
 }
@@ -517,9 +523,8 @@ function getActiveGroupById(groupId) {
 
 function getGroupAccountCount(groupId) {
   const activeCount = state.accounts.filter((account) => account.groupId === groupId).length;
-  if (activeCount > 0) return activeCount;
   const group = getGroupById(groupId);
-  return group?.maxAccounts || 0;
+  return Math.max(activeCount, group?.maxAccounts || 0);
 }
 
 function getGroupDisplayAccountCount(groupId) {
