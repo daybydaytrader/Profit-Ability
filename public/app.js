@@ -25,6 +25,7 @@ const seed = {
   accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE, createdAt: new Date().toISOString().slice(0, 10), propFirm: "" }],
   archivedAccounts: [],
   groups: [],
+  archivedGroups: [],
   playbook: [{ id: "pb1", title: "ORB", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }, { id: "pb2", title: "Pullback", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }],
   rules: [
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
@@ -290,14 +291,31 @@ function normalizeAccount(account) {
     propFirm: String(account?.propFirm || ""),
     createdAt,
     archivedAt: archivedAtRaw,
+    groupAccountsAtArchive: Math.max(0, Math.floor(Number(account?.groupAccountsAtArchive) || 0)),
   };
 }
 
 
+function getAccountSessionDateRange(accountId) {
+  const dates = state.sessions
+    .filter((session) => {
+      if (session.accountId === accountId) return true;
+      return session.trades.some((trade) => getTradeAccountTargetId(trade, session) === accountId);
+    })
+    .map((session) => String(session.date || ""))
+    .filter(Boolean)
+    .sort();
+  if (!dates.length) return { first: "", last: "" };
+  return { first: dates[0], last: dates[dates.length - 1] };
+}
+
 function formatAgeRange(account) {
+  const { first, last } = getAccountSessionDateRange(account?.id);
+  const firstDisplay = first.slice(5, 10);
+  const lastDisplay = last.slice(5, 10);
+  if (firstDisplay && lastDisplay) return `${firstDisplay} - ${lastDisplay}`;
+  if (firstDisplay) return `${firstDisplay} - active`;
   const created = String(account?.createdAt || "").slice(5, 10);
-  const archived = String(account?.archivedAt || "").slice(5, 10);
-  if (created && archived) return `${created} - ${archived}`;
   if (created) return `${created} - active`;
   return "—";
 }
@@ -307,7 +325,8 @@ function archiveAccount(accountId) {
   const account = state.accounts[index];
   if (index < 0 || !account) return;
   const archivedAt = new Date().toISOString().slice(0, 10);
-  const archivedAccount = normalizeAccount({ ...account, archivedAt });
+  const groupAccountsAtArchive = account.groupId ? getGroupDisplayAccountCount(account.groupId) : 0;
+  const archivedAccount = normalizeAccount({ ...account, archivedAt, groupAccountsAtArchive });
   const fallback = state.accounts.find((item) => item.id !== accountId)?.id || "";
   const affectedSessionIds = state.sessions.filter((session) => session.accountId === accountId).map((session) => session.id);
   state.accounts.splice(index, 1);
@@ -340,11 +359,34 @@ function evaluateAccountDrawdowns() {
   blown.forEach((account) => archiveAccount(account.id));
 }
 
+function evaluateGroupLiveness() {
+  const emptyGroups = state.groups.filter((group) => state.accounts.filter((account) => account.groupId === group.id).length === 0);
+  if (!emptyGroups.length) return;
+  const archivedAt = new Date().toISOString().slice(0, 10);
+  emptyGroups.forEach((group) => {
+    const index = state.groups.findIndex((item) => item.id === group.id);
+    if (index < 0) return;
+    const archived = normalizeGroup({ ...group, archivedAt, maxAccounts: Math.max(group.maxAccounts || 0, 1) });
+    state.groups.splice(index, 1);
+    state.archivedGroups.unshift(archived);
+  });
+}
+
+function refreshGroupMaxAccounts() {
+  state.groups.forEach((group) => {
+    const activeCount = state.accounts.filter((account) => account.groupId === group.id).length;
+    group.maxAccounts = Math.max(group.maxAccounts || 0, activeCount);
+  });
+}
+
 function normalizeGroup(group) {
   const name = String(group?.name || "").trim();
+  const maxAccountsRaw = Number(group?.maxAccounts);
   return {
     id: group?.id || `grp${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
     name: name || "Group",
+    archivedAt: String(group?.archivedAt || "").slice(0, 10),
+    maxAccounts: Number.isFinite(maxAccountsRaw) && maxAccountsRaw > 0 ? Math.floor(maxAccountsRaw) : 0,
   };
 }
 
@@ -422,8 +464,9 @@ function loadState() {
   const accounts = (Array.isArray(parsed.accounts) ? parsed.accounts : [legacyAccount]).map(normalizeAccount);
   const archivedAccounts = (Array.isArray(parsed.archivedAccounts) ? parsed.archivedAccounts : []).map(normalizeAccount);
   const groups = (Array.isArray(parsed.groups) ? parsed.groups : []).map(normalizeGroup);
+  const archivedGroups = (Array.isArray(parsed.archivedGroups) ? parsed.archivedGroups : []).map(normalizeGroup);
   const accountIds = new Set(accounts.map((a) => a.id));
-  const groupIds = new Set(groups.map((g) => g.id));
+  const groupIds = new Set([...groups, ...archivedGroups].map((g) => g.id));
   sessions.forEach((session) => {
     if (!accountIds.has(session.accountId) && !groupIds.has(session.accountId)) session.accountId = accounts[0]?.id || "";
     session.trades.forEach((trade) => {
@@ -436,6 +479,7 @@ function loadState() {
     accounts,
     archivedAccounts,
     groups,
+    archivedGroups,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
     sessions: sessions.length ? sessions : structuredClone(seed.sessions),
@@ -462,16 +506,29 @@ function getAccountById(accountId) {
 }
 
 function getGroupById(groupId) {
+  return state.groups.find((group) => group.id === groupId)
+    || state.archivedGroups.find((group) => group.id === groupId)
+    || null;
+}
+
+function getActiveGroupById(groupId) {
   return state.groups.find((group) => group.id === groupId) || null;
 }
 
 function getGroupAccountCount(groupId) {
-  return state.accounts.filter((account) => account.groupId === groupId).length;
+  const activeCount = state.accounts.filter((account) => account.groupId === groupId).length;
+  if (activeCount > 0) return activeCount;
+  const group = getGroupById(groupId);
+  return group?.maxAccounts || 0;
+}
+
+function getGroupDisplayAccountCount(groupId) {
+  return Math.max(1, getGroupAccountCount(groupId));
 }
 
 function getSessionMultiplier(session) {
   const group = getGroupById(session.accountId);
-  return group ? Math.max(1, getGroupAccountCount(group.id)) : 1;
+  return group ? getGroupDisplayAccountCount(group.id) : 1;
 }
 
 function getTradeAccountTargetId(trade, session) {
@@ -482,7 +539,7 @@ function getTradeMultiplier(trade, session) {
   const targetId = getTradeAccountTargetId(trade, session);
   const group = getGroupById(targetId);
   if (!group) return 1;
-  return getGroupAccountCount(group.id);
+  return getGroupDisplayAccountCount(group.id);
 }
 
 function calcTradeNet(trade, session) {
@@ -491,7 +548,7 @@ function calcTradeNet(trade, session) {
 
 function accountTargetLabel(id) {
   const group = getGroupById(id);
-  if (group) return `${group.name} (Group • ${getGroupAccountCount(group.id)} accounts)`;
+  if (group) return `${group.name} (Group • ${getGroupDisplayAccountCount(group.id)} accounts${group.archivedAt ? " • inactive" : ""})`;
   const account = state.accounts.find((item) => item.id === id) || state.archivedAccounts.find((item) => item.id === id);
   if (account) return account.name;
   return "—";
@@ -708,9 +765,13 @@ function accountOptions(selected = "") {
     .map((account) => `<option value="${account.id}" ${selected === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`)
     .join("");
   const groupOptionsHtml = state.groups
-    .map((group) => `<option value="${group.id}" ${selected === group.id ? "selected" : ""}>${escapeHtml(group.name)} (${getGroupAccountCount(group.id)} acc)</option>`)
+    .map((group) => `<option value="${group.id}" ${selected === group.id ? "selected" : ""}>${escapeHtml(group.name)} (${getGroupDisplayAccountCount(group.id)} acc)</option>`)
     .join("");
-  return `${accountOptionsHtml}${groupOptionsHtml}`;
+  const selectedArchivedGroup = state.archivedGroups.find((group) => group.id === selected);
+  const archivedSelectedHtml = selectedArchivedGroup
+    ? `<option value="${selectedArchivedGroup.id}" selected>${escapeHtml(selectedArchivedGroup.name)} (${getGroupDisplayAccountCount(selectedArchivedGroup.id)} acc • inactive)</option>`
+    : "";
+  return `${accountOptionsHtml}${groupOptionsHtml}${archivedSelectedHtml}`;
 }
 
 function renderFilterSelects() {
@@ -734,7 +795,7 @@ function renderAccounts() {
     if (uiState.accountsView === "past") {
       list.innerHTML = state.archivedAccounts.length
         ? state.archivedAccounts
-            .map((account) => `<article class="account-thin-card" data-open-archived-account="${account.id}"><span class="account-line"><strong>${escapeHtml(account.name)}</strong> · $${formatWithThousands(account.startingBalance, 0)} · ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "No group")} · ${escapeHtml(formatAgeRange(account))}</span><button type="button" data-restore-account="${account.id}">Restore</button></article>`)
+            .map((account) => `<article class="account-thin-card" data-open-archived-account="${account.id}"><span class="account-line"><strong>${escapeHtml(account.name)}</strong> · $${formatWithThousands(account.startingBalance, 0)} · ${escapeHtml(account.groupId ? `${accountTargetLabel(account.groupId).replace(/ \(Group.+/, "")} (Group • ${Math.max(1, account.groupAccountsAtArchive || getGroupDisplayAccountCount(account.groupId))} accounts)` : "No group")} · ${escapeHtml(formatAgeRange(account))}</span><button type="button" data-restore-account="${account.id}">Restore</button></article>`)
             .join("")
         : '<div class="muted small">No past accounts yet.</div>';
     } else {
@@ -748,9 +809,17 @@ function renderAccounts() {
   if (groupsList) {
     groupsList.innerHTML = state.groups.length
       ? state.groups
-          .map((group) => `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupAccountCount(group.id)} acc</span> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Click to view/edit members.</p></article>`)
+          .map((group) => `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Click to view/edit members.</p></article>`)
           .join("")
-      : '<div class="muted small">No groups yet.</div>';
+      : '<div class="muted small">No current groups yet.</div>';
+  }
+  const pastGroupsList = document.getElementById("pastGroupsList");
+  if (pastGroupsList) {
+    pastGroupsList.innerHTML = state.archivedGroups.length
+      ? state.archivedGroups
+          .map((group) => `<article class="playbook-card"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span></div></div><p class="muted small">This group is no longer alive.</p></article>`)
+          .join("")
+      : '<div class="muted small">No past groups yet.</div>';
   }
 }
 
@@ -1404,6 +1473,8 @@ function closeImageModal() {
 
 function rerender() {
   evaluateAccountDrawdowns();
+  refreshGroupMaxAccounts();
+  evaluateGroupLiveness();
   saveState();
   renderFilterSelects();
   renderOverview();
@@ -1545,7 +1616,7 @@ function refreshGroupBuilderLists() {
   const selected = document.getElementById("groupBuilderSelected");
   if (!available || !selected) return;
   const pool = state.accounts.filter((account) => {
-    if (!account.groupId) return true;
+    if (!account.groupId || !getActiveGroupById(account.groupId)) return true;
     if (uiState.groupBuilderSelection.includes(account.id)) return true;
     if (uiState.editingGroupId && account.groupId === uiState.editingGroupId) return true;
     return false;
@@ -1594,7 +1665,7 @@ function wireGroupBuilderDnD(selectEl, toSelected) {
 function openGroupBuilderModal(editGroupId = null) {
   uiState.editingGroupId = editGroupId;
   if (editGroupId) {
-    const group = getGroupById(editGroupId);
+    const group = getActiveGroupById(editGroupId);
     uiState.groupBuilderSelection = state.accounts.filter((a) => a.groupId === editGroupId).map((a) => a.id);
     document.getElementById("groupBuilderNameInput").value = group?.name || "";
   } else {
@@ -1620,7 +1691,7 @@ function saveGroupFromBuilder() {
     if (!group) return;
     group.name = name;
   } else {
-    group = normalizeGroup({ id: `grp${Date.now()}`, name });
+    group = normalizeGroup({ id: `grp${Date.now()}`, name, maxAccounts: uiState.groupBuilderSelection.length });
     state.groups.push(group);
   }
   state.accounts.forEach((account) => {
@@ -1629,6 +1700,7 @@ function saveGroupFromBuilder() {
   state.accounts.forEach((account) => {
     if (uiState.groupBuilderSelection.includes(account.id)) account.groupId = group.id;
   });
+  group.maxAccounts = Math.max(group.maxAccounts || 0, uiState.groupBuilderSelection.length);
   if (!document.getElementById("accountGroupPickerModal").hidden) {
     uiState.groupPickerSelectedId = group.id;
     renderAccountGroupCards();
@@ -1689,7 +1761,7 @@ function openDeleteEntityModal(type, id) {
     infoHtml = `<p><strong>Name:</strong> ${escapeHtml(account.name)}</p><p><strong>Starting equity:</strong> $${formatWithThousands(account.startingBalance, 0)}</p><p><strong>Max drawdown:</strong> $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p><strong>Group:</strong> ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p>`;
   }
   if (type === "group") {
-    const group = state.groups.find((item) => item.id === id);
+    const group = getGroupById(id);
     if (!group) return;
     const members = state.accounts.filter((account) => account.groupId === group.id);
     title = "Delete Group";
@@ -1876,6 +1948,7 @@ function importBackupFile(file) {
       const legacyStart = Number(migrated.accountStart);
       state.accounts = (Array.isArray(migrated.accounts) ? migrated.accounts : [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE }]).map(normalizeAccount);
       state.groups = (Array.isArray(migrated.groups) ? migrated.groups : []).map(normalizeGroup);
+      state.archivedGroups = (Array.isArray(migrated.archivedGroups) ? migrated.archivedGroups : []).map(normalizeGroup);
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
@@ -1892,6 +1965,7 @@ function importBackupFile(file) {
 function resetToDemo() {
   state.accounts = structuredClone(seed.accounts);
   state.groups = structuredClone(seed.groups);
+  state.archivedGroups = structuredClone(seed.archivedGroups || []);
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions);
