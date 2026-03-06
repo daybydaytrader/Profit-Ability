@@ -50,6 +50,10 @@ const seed = {
 
 let state;
 
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function normalizeCustomSymbol(symbol) {
   const ticker = String(symbol?.ticker || "").trim().toUpperCase();
   const tickSize = Number(symbol?.tickSize);
@@ -98,6 +102,7 @@ const uiState = {
     journalFrom: "",
     journalTo: "",
   },
+  groupsView: "active",
   imageEditor: {
     visible: false,
     expanded: false,
@@ -134,13 +139,17 @@ function undoLastDeletion() {
       if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.account.id;
     });
   } else if (entry.type === "group") {
-    state.groups.splice(entry.index, 0, entry.group);
-    state.accounts.forEach((account) => {
-      if (entry.memberAccountIds.includes(account.id)) account.groupId = entry.group.id;
-    });
-    state.sessions.forEach((session) => {
-      if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.group.id;
-    });
+    if (entry.archived) {
+      state.archivedGroups.splice(entry.index, 0, entry.group);
+    } else {
+      state.groups.splice(entry.index, 0, entry.group);
+      state.accounts.forEach((account) => {
+        if (entry.memberAccountIds.includes(account.id)) account.groupId = entry.group.id;
+      });
+      state.sessions.forEach((session) => {
+        if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.group.id;
+      });
+    }
   } else if (entry.type === "archive-account") {
     state.archivedAccounts = state.archivedAccounts.filter((account) => account.id !== entry.account.id);
     state.accounts.splice(entry.index, 0, normalizeAccount({ ...entry.account, archivedAt: "" }));
@@ -295,6 +304,34 @@ function normalizeAccount(account) {
   };
 }
 
+function normalizeGroupMemberSnapshot(member) {
+  const id = String(member?.id || "");
+  if (!id) return null;
+  return {
+    id,
+    name: String(member?.name || "Account").trim() || "Account",
+    startingBalance: Math.max(0, Number(member?.startingBalance) || 0),
+    maxDrawdown: Math.max(0, Number(member?.maxDrawdown) || 0),
+    propFirm: String(member?.propFirm || ""),
+    createdAt: String(member?.createdAt || "").slice(0, 10),
+    archivedAt: String(member?.archivedAt || "").slice(0, 10),
+  };
+}
+
+function snapshotFromAccount(account) {
+  return normalizeGroupMemberSnapshot(account);
+}
+
+function mergeGroupMemberSnapshots(existing = [], additions = []) {
+  const map = new Map();
+  [...existing, ...additions].forEach((member) => {
+    const normalized = normalizeGroupMemberSnapshot(member);
+    if (!normalized) return;
+    map.set(normalized.id, normalized);
+  });
+  return [...map.values()];
+}
+
 
 function getAccountSessionDateRange(accountId) {
   const dates = state.sessions
@@ -330,7 +367,7 @@ function archiveAccount(accountId) {
   const index = state.accounts.findIndex((account) => account.id === accountId);
   const account = state.accounts[index];
   if (index < 0 || !account) return;
-  const archivedAt = new Date().toISOString().slice(0, 10);
+  const archivedAt = todayIso();
   const groupAccountsAtArchive = account.groupId ? getGroupDisplayAccountCount(account.groupId) : 0;
   const archivedAccount = normalizeAccount({ ...account, archivedAt, groupAccountsAtArchive });
   const fallback = state.accounts.find((item) => item.id !== accountId)?.id || "";
@@ -366,9 +403,13 @@ function evaluateAccountDrawdowns() {
 }
 
 function evaluateGroupLiveness() {
-  const emptyGroups = state.groups.filter((group) => state.accounts.filter((account) => account.groupId === group.id).length === 0);
+  const emptyGroups = state.groups.filter((group) => {
+    const activeCount = state.accounts.filter((account) => account.groupId === group.id).length;
+    const hadMembers = (group.maxAccounts || 0) > 0 || (group.memberSnapshots || []).length > 0;
+    return activeCount === 0 && hadMembers;
+  });
   if (!emptyGroups.length) return;
-  const archivedAt = new Date().toISOString().slice(0, 10);
+  const archivedAt = todayIso();
   emptyGroups.forEach((group) => {
     const index = state.groups.findIndex((item) => item.id === group.id);
     if (index < 0) return;
@@ -391,8 +432,10 @@ function normalizeGroup(group) {
   return {
     id: group?.id || `grp${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
     name: name || "Group",
+    createdAt: String(group?.createdAt || "").slice(0, 10) || todayIso(),
     archivedAt: String(group?.archivedAt || "").slice(0, 10),
     maxAccounts: Number.isFinite(maxAccountsRaw) && maxAccountsRaw > 0 ? Math.floor(maxAccountsRaw) : 0,
+    memberSnapshots: mergeGroupMemberSnapshots(group?.memberSnapshots || []),
   };
 }
 
@@ -508,7 +551,9 @@ function switchTab(name) {
 
 
 function getAccountById(accountId) {
-  return state.accounts.find((account) => account.id === accountId) || state.accounts[0];
+  return state.accounts.find((account) => account.id === accountId)
+    || state.archivedAccounts.find((account) => account.id === accountId)
+    || null;
 }
 
 function getGroupById(groupId) {
@@ -540,6 +585,24 @@ function getTradeAccountTargetId(trade, session) {
   return String(trade?.accountId || session?.accountId || "");
 }
 
+function getActiveTargetIds() {
+  return new Set([...state.accounts.map((account) => account.id), ...state.groups.map((group) => group.id)]);
+}
+
+function isActiveTargetId(targetId) {
+  return getActiveTargetIds().has(String(targetId || ""));
+}
+
+function sessionMatchesTarget(session, accountId) {
+  if (accountId === "all") {
+    const activeTargetIds = getActiveTargetIds();
+    if (activeTargetIds.has(session.accountId)) return true;
+    return session.trades.some((trade) => activeTargetIds.has(getTradeAccountTargetId(trade, session)));
+  }
+  if (session.accountId === accountId) return true;
+  return session.trades.some((trade) => getTradeAccountTargetId(trade, session) === accountId);
+}
+
 function getTradeMultiplier(trade, session) {
   const targetId = getTradeAccountTargetId(trade, session);
   const group = getGroupById(targetId);
@@ -561,11 +624,21 @@ function accountTargetLabel(id) {
 
 function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
   return state.sessions.filter((session) => {
-    if (accountId !== "all" && session.accountId !== accountId) return false;
+    if (!sessionMatchesTarget(session, accountId)) return false;
     if (from && session.date < from) return false;
     if (to && session.date > to) return false;
     return true;
   });
+}
+
+function getSessionNetForFilter(session, accountId = "all") {
+  return session.trades.reduce((acc, trade) => {
+    const targetId = getTradeAccountTargetId(trade, session);
+    if (accountId === "all" && !isActiveTargetId(targetId)) return acc;
+    if (accountId !== "all" && targetId !== accountId) return acc;
+    const tradeNet = calcTradePnl(trade) * getTradeMultiplier(trade, session);
+    return acc + tradeNet;
+  }, 0);
 }
 
 function calcR(trade) {
@@ -636,19 +709,29 @@ function getSessionRuleAdherence(session) {
 }
 
 function metrics() {
-  const allTrades = getAllTrades();
-  const net = state.sessions.reduce((acc, session) => acc + getSessionTotalNet(session), 0);
+  const filteredSessions = getFilteredSessions({
+    accountId: uiState.filters.overviewAccountId,
+    from: uiState.filters.overviewFrom,
+    to: uiState.filters.overviewTo,
+  });
+  const selectedTargetId = uiState.filters.overviewAccountId;
+  const allTrades = filteredSessions.flatMap((session) => session.trades.filter((trade) => {
+    const targetId = getTradeAccountTargetId(trade, session);
+    if (selectedTargetId === "all") return isActiveTargetId(targetId);
+    return targetId === selectedTargetId;
+  }));
+  const net = filteredSessions.reduce((acc, session) => acc + getSessionNetForFilter(session, selectedTargetId), 0);
   const wins = allTrades.filter((t) => calcTradePnl(t) > 0).length;
   const winRate = allTrades.length ? (wins / allTrades.length) * 100 : 0;
 
-  const sessionAdherences = state.sessions
+  const sessionAdherences = filteredSessions
     .map((session) => getSessionRuleAdherence(session))
     .filter((value) => value !== null);
   const ruleScore = sessionAdherences.length
     ? sessionAdherences.reduce((acc, value) => acc + value, 0) / sessionAdherences.length
     : 0;
 
-  return { net, trades: allTrades.length, sessions: state.sessions.length, winRate, ruleScore };
+  return { net, trades: allTrades.length, sessions: filteredSessions.length, winRate, ruleScore };
 }
 
 function drawEquity() {
@@ -668,7 +751,7 @@ function drawEquity() {
       ? account.startingBalance
       : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
   const points = [start];
-  sessions.forEach((session) => points.push(points.at(-1) + getSessionTotalNet(session)));
+  sessions.forEach((session) => points.push(points.at(-1) + getSessionNetForFilter(session, selectedId)));
   const labels = ["Start", ...sessions.map((session) => session.date)];
   const min = Math.min(...points);
   const max = Math.max(...points);
@@ -766,17 +849,19 @@ function renderOverview() {
 
 
 function accountOptions(selected = "") {
-  const accountOptionsHtml = state.accounts
-    .map((account) => `<option value="${account.id}" ${selected === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`)
-    .join("");
-  const groupOptionsHtml = state.groups
-    .map((group) => `<option value="${group.id}" ${selected === group.id ? "selected" : ""}>${escapeHtml(group.name)} (${getGroupDisplayAccountCount(group.id)} acc)</option>`)
-    .join("");
-  const selectedArchivedGroup = state.archivedGroups.find((group) => group.id === selected);
-  const archivedSelectedHtml = selectedArchivedGroup
-    ? `<option value="${selectedArchivedGroup.id}" selected>${escapeHtml(selectedArchivedGroup.name)} (${getGroupDisplayAccountCount(selectedArchivedGroup.id)} acc • inactive)</option>`
-    : "";
-  return `${accountOptionsHtml}${groupOptionsHtml}${archivedSelectedHtml}`;
+  const options = [];
+  const seen = new Set();
+  const addOption = (id, label) => {
+    const key = String(id || "");
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    options.push(`<option value="${key}" ${selected === key ? "selected" : ""}>${escapeHtml(label)}</option>`);
+  };
+  state.accounts.forEach((account) => addOption(account.id, account.name));
+  state.groups.forEach((group) => addOption(group.id, `${group.name} (${getGroupDisplayAccountCount(group.id)} acc)`));
+  state.archivedAccounts.forEach((account) => addOption(account.id, `${account.name} (inactive)`));
+  state.archivedGroups.forEach((group) => addOption(group.id, `${group.name} (${getGroupDisplayAccountCount(group.id)} acc • inactive)`));
+  return options.join("");
 }
 
 function renderFilterSelects() {
@@ -791,10 +876,14 @@ function renderFilterSelects() {
 function renderAccounts() {
   const list = document.getElementById("accountsList");
   const groupsList = document.getElementById("groupsList");
+  const groupsActiveTabBtn = document.getElementById("groupsViewActiveBtn");
+  const groupsPastTabBtn = document.getElementById("groupsViewPastBtn");
   const activeTabBtn = document.getElementById("accountsViewActiveBtn");
   const pastTabBtn = document.getElementById("accountsViewPastBtn");
   if (activeTabBtn) activeTabBtn.classList.toggle("active", uiState.accountsView !== "past");
   if (pastTabBtn) pastTabBtn.classList.toggle("active", uiState.accountsView === "past");
+  if (groupsActiveTabBtn) groupsActiveTabBtn.classList.toggle("active", uiState.groupsView !== "past");
+  if (groupsPastTabBtn) groupsPastTabBtn.classList.toggle("active", uiState.groupsView === "past");
 
   if (list) {
     if (uiState.accountsView === "past") {
@@ -812,19 +901,17 @@ function renderAccounts() {
     }
   }
   if (groupsList) {
-    groupsList.innerHTML = state.groups.length
-      ? state.groups
-          .map((group) => `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Click to view/edit members.</p></article>`)
-          .join("")
-      : '<div class="muted small">No current groups yet.</div>';
-  }
-  const pastGroupsList = document.getElementById("pastGroupsList");
-  if (pastGroupsList) {
-    pastGroupsList.innerHTML = state.archivedGroups.length
-      ? state.archivedGroups
-          .map((group) => `<article class="playbook-card"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span></div></div><p class="muted small">This group is no longer alive.</p></article>`)
-          .join("")
-      : '<div class="muted small">No past groups yet.</div>';
+    groupsList.innerHTML = uiState.groupsView === "past"
+      ? (state.archivedGroups.length
+          ? state.archivedGroups
+              .map((group) => `<article class="playbook-card" data-open-group-entity="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Inactive group • click to view details.</p></article>`)
+              .join("")
+          : '<div class="muted small">No past groups yet.</div>')
+      : (state.groups.length
+          ? state.groups
+              .map((group) => `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Click to view/edit members.</p></article>`)
+              .join("")
+          : '<div class="muted small">No current groups yet.</div>');
   }
 }
 
@@ -1579,7 +1666,12 @@ function saveAccountFromModal() {
   }
   if (!name || !Number.isFinite(startingBalance) || startingBalance < 0 || !Number.isFinite(maxDrawdown) || maxDrawdown < 0) return;
 
-  state.accounts.push(normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: uiState.pendingAccountGroupId || "", propFirm, createdAt: new Date().toISOString().slice(0, 10) }));
+  const newAccount = normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: uiState.pendingAccountGroupId || "", propFirm, createdAt: todayIso() });
+  state.accounts.push(newAccount);
+  if (newAccount.groupId) {
+    const group = getActiveGroupById(newAccount.groupId);
+    if (group) group.memberSnapshots = mergeGroupMemberSnapshots(group.memberSnapshots || [], [snapshotFromAccount(newAccount)]);
+  }
   closeAccountModal();
   rerender();
 }
@@ -1696,7 +1788,7 @@ function saveGroupFromBuilder() {
     if (!group) return;
     group.name = name;
   } else {
-    group = normalizeGroup({ id: `grp${Date.now()}`, name, maxAccounts: uiState.groupBuilderSelection.length });
+    group = normalizeGroup({ id: `grp${Date.now()}`, name, createdAt: todayIso(), maxAccounts: uiState.groupBuilderSelection.length });
     state.groups.push(group);
   }
   state.accounts.forEach((account) => {
@@ -1705,6 +1797,11 @@ function saveGroupFromBuilder() {
   state.accounts.forEach((account) => {
     if (uiState.groupBuilderSelection.includes(account.id)) account.groupId = group.id;
   });
+  const snapshotMembers = uiState.groupBuilderSelection
+    .map((id) => state.accounts.find((account) => account.id === id))
+    .filter(Boolean)
+    .map(snapshotFromAccount);
+  group.memberSnapshots = mergeGroupMemberSnapshots(group.memberSnapshots || [], snapshotMembers);
   group.maxAccounts = Math.max(group.maxAccounts || 0, uiState.groupBuilderSelection.length);
   if (!document.getElementById("accountGroupPickerModal").hidden) {
     uiState.groupPickerSelectedId = group.id;
@@ -1712,6 +1809,30 @@ function saveGroupFromBuilder() {
   }
   closeGroupBuilderModal();
   rerender();
+}
+
+function formatLifeRange(start, end) {
+  const formatDate = (value) => {
+    if (!value) return "";
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+  };
+  const startLabel = formatDate(start);
+  const endLabel = formatDate(end);
+  if (startLabel && endLabel) return `${startLabel} - ${endLabel}`;
+  if (startLabel) return `${startLabel} - active`;
+  return "—";
+}
+
+function getGroupMemberCards(group) {
+  const activeMembers = state.accounts
+    .filter((account) => account.groupId === group.id)
+    .map((account) => ({ ...snapshotFromAccount(account), isActive: true }));
+  const archivedMembers = (group.memberSnapshots || [])
+    .filter((member) => !activeMembers.some((active) => active.id === member.id))
+    .map((member) => ({ ...member, isActive: false }));
+  return [...activeMembers, ...archivedMembers];
 }
 
 function openAccountEntityModal(type, id) {
@@ -1726,17 +1847,43 @@ function openAccountEntityModal(type, id) {
     body.innerHTML = `<label>Title<input id="entityAccountNameInput" value="${escapeHtml(account.name)}" /></label><label>Starting equity<input id="entityAccountStartInput" type="number" min="0" step="100" value="${account.startingBalance}" /></label><label>Max drawdown<input id="entityAccountMaxDdInput" type="number" min="0" step="100" value="${account.maxDrawdown || 0}" /></label><label>Group<select id="entityAccountGroupSelect"><option value="">No group</option>${state.groups.map((g) => `<option value="${g.id}" ${account.groupId === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`).join("")}</select></label><p class="muted small">Current equity: $${formatWithThousands(getAccountCurrentEquity(account.id), 0)}</p>`;
     actions.innerHTML = `<button type="button" id="saveEntityAccountBtn">Save</button><button type="button" class="danger" id="removeEntityAccountBtn">Remove</button>`;
     document.getElementById("saveEntityAccountBtn").onclick = () => {
+      const previousGroupId = account.groupId;
       account.name = document.getElementById("entityAccountNameInput").value.trim() || account.name;
       account.startingBalance = Math.max(0, Number(document.getElementById("entityAccountStartInput").value || account.startingBalance));
       account.maxDrawdown = Math.max(0, Number(document.getElementById("entityAccountMaxDdInput").value || account.maxDrawdown || 0));
       account.groupId = document.getElementById("entityAccountGroupSelect").value;
+      if (previousGroupId) {
+        const prevGroup = getActiveGroupById(previousGroupId);
+        if (prevGroup) prevGroup.memberSnapshots = mergeGroupMemberSnapshots(prevGroup.memberSnapshots || [], [snapshotFromAccount(account)]);
+      }
+      if (account.groupId) {
+        const group = getActiveGroupById(account.groupId);
+        if (group) group.memberSnapshots = mergeGroupMemberSnapshots(group.memberSnapshots || [], [snapshotFromAccount(account)]);
+      }
       rerender();
       closeAccountEntityModal();
     };
     document.getElementById("removeEntityAccountBtn").onclick = () => { closeAccountEntityModal(); openDeleteEntityModal("account", account.id); };
+  } else if (type === "group") {
+    const group = getGroupById(id);
+    if (!group) return;
+    const isArchived = Boolean(group.archivedAt);
+    const members = getGroupMemberCards(group);
+    title.textContent = group.name;
+    body.innerHTML = `<p><strong>Status:</strong> ${isArchived ? "Inactive" : "Active"}</p><p><strong>Accounts:</strong> ${getGroupDisplayAccountCount(group.id)}</p><p><strong>Age range:</strong> ${escapeHtml(formatLifeRange(group.createdAt, group.archivedAt))}</p><div class="group-member-cards">${members.length
+      ? members.map((member) => `<article class="account-thin-card"><span class="account-line"><strong>${escapeHtml(member.name)}</strong> · $${formatWithThousands(member.startingBalance, 0)} · Max DD $${formatWithThousands(member.maxDrawdown || 0, 0)} · ${escapeHtml(member.propFirm || "Custom")} ${member.isActive ? "· active" : "· inactive"}</span></article>`).join("")
+      : '<p class="muted small">No account snapshots found.</p>'}</div>`;
+    actions.innerHTML = `${isArchived ? "" : `<button type="button" id="editEntityGroupBtn">Edit Members</button>`}<button type="button" class="danger" id="removeEntityGroupBtn">Remove</button>`;
+    const editBtn = document.getElementById("editEntityGroupBtn");
+    if (editBtn) {
+      editBtn.onclick = () => {
+        closeAccountEntityModal();
+        openGroupBuilderModal(group.id);
+      };
+    }
+    const removeBtn = document.getElementById("removeEntityGroupBtn");
+    if (removeBtn) removeBtn.onclick = () => { closeAccountEntityModal(); openDeleteEntityModal("group", group.id); };
   } else {
-    closeAccountEntityModal();
-    openGroupBuilderModal(id);
     return;
   }
   document.getElementById("accountEntityModal").hidden = false;
@@ -1768,9 +1915,9 @@ function openDeleteEntityModal(type, id) {
   if (type === "group") {
     const group = getGroupById(id);
     if (!group) return;
-    const members = state.accounts.filter((account) => account.groupId === group.id);
+    const members = getGroupMemberCards(group);
     title = "Delete Group";
-    infoHtml = `<p><strong>Name:</strong> ${escapeHtml(group.name)}</p><p><strong>Accounts:</strong></p><ul>${members.length ? members.map((account) => `<li>${escapeHtml(account.name)}</li>`).join("") : "<li>No accounts</li>"}</ul>`;
+    infoHtml = `<p><strong>Name:</strong> ${escapeHtml(group.name)}</p><p><strong>Status:</strong> ${group.archivedAt ? "Inactive" : "Active"}</p><p><strong>Age range:</strong> ${escapeHtml(formatLifeRange(group.createdAt, group.archivedAt))}</p><p><strong>Accounts:</strong></p><ul>${members.length ? members.map((account) => `<li>${escapeHtml(account.name)}</li>`).join("") : "<li>No accounts</li>"}</ul>`;
   }
   if (type === "session") {
     const session = state.sessions.find((item) => item.id === id);
@@ -1846,12 +1993,13 @@ function confirmDeleteEntity() {
     }
   } else if (target.type === "group") {
     const index = state.groups.findIndex((group) => group.id === target.id);
-    const group = state.groups[index];
+    const archivedIndex = state.archivedGroups.findIndex((group) => group.id === target.id);
+    const group = state.groups[index] || state.archivedGroups[archivedIndex];
     if (index >= 0 && group) {
       const memberAccountIds = state.accounts.filter((account) => account.groupId === target.id).map((account) => account.id);
       const fallback = state.accounts[0]?.id || "";
       const affectedSessionIds = state.sessions.filter((session) => session.accountId === target.id).map((session) => session.id);
-      pushDeletionHistory({ type: "group", group: structuredClone(group), index, memberAccountIds, affectedSessionIds });
+      pushDeletionHistory({ type: "group", group: structuredClone(group), index, memberAccountIds, affectedSessionIds, archived: false });
       state.groups.splice(index, 1);
       state.accounts.forEach((account) => {
         if (account.groupId === target.id) account.groupId = "";
@@ -1859,6 +2007,11 @@ function confirmDeleteEntity() {
       state.sessions.forEach((session) => {
         if (session.accountId === target.id) session.accountId = fallback;
       });
+      if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
+      if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
+    } else if (archivedIndex >= 0 && group) {
+      pushDeletionHistory({ type: "group", group: structuredClone(group), index: archivedIndex, archived: true });
+      state.archivedGroups.splice(archivedIndex, 1);
       if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
       if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
     }
@@ -2121,6 +2274,11 @@ document.getElementById("groupsList").addEventListener("click", (e) => {
     openDeleteEntityModal("group", removeId);
     return;
   }
+  const pastGroupId = e.target.closest("[data-open-group-entity]")?.dataset.openGroupEntity;
+  if (pastGroupId) {
+    openAccountEntityModal("group", pastGroupId);
+    return;
+  }
   const groupId = e.target.closest("[data-open-group]")?.dataset.openGroup;
   if (!groupId) return;
   openGroupBuilderModal(groupId);
@@ -2139,6 +2297,8 @@ document.getElementById("resetBtn").addEventListener("click", resetToDemo);
 document.getElementById("addAccountBtn").addEventListener("click", openAccountModal);
 document.getElementById("accountsViewActiveBtn").addEventListener("click", () => { uiState.accountsView = "active"; renderAccounts(); });
 document.getElementById("accountsViewPastBtn").addEventListener("click", () => { uiState.accountsView = "past"; renderAccounts(); });
+document.getElementById("groupsViewActiveBtn").addEventListener("click", () => { uiState.groupsView = "active"; renderAccounts(); });
+document.getElementById("groupsViewPastBtn").addEventListener("click", () => { uiState.groupsView = "past"; renderAccounts(); });
 document.getElementById("saveAccountBtn").addEventListener("click", saveAccountFromModal);
 document.getElementById("accountModalFirmInput").addEventListener("change", (e) => {
   const wrap = document.getElementById("accountModalTptWrap");
