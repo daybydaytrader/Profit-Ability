@@ -606,14 +606,27 @@ function isActiveTargetId(targetId) {
   return getActiveTargetIds().has(String(targetId || ""));
 }
 
+function getTradeAccountIds(trade, session) {
+  const targetId = getTradeAccountTargetId(trade, session);
+  const group = getGroupById(targetId);
+  if (!group) return targetId ? [targetId] : [];
+  return state.accounts.filter((account) => account.groupId === group.id).map((account) => account.id);
+}
+
+function getSelectedAccountIds(accountId = "all") {
+  if (accountId === "all") return state.accounts.map((account) => account.id);
+  const group = getGroupById(accountId);
+  if (group) return state.accounts.filter((account) => account.groupId === group.id).map((account) => account.id);
+  return [accountId];
+}
+
 function sessionMatchesTarget(session, accountId) {
   if (accountId === "all") {
-    const activeTargetIds = getActiveTargetIds();
-    if (activeTargetIds.has(session.accountId)) return true;
-    return session.trades.some((trade) => activeTargetIds.has(getTradeAccountTargetId(trade, session)));
+    const selectedIds = new Set(getSelectedAccountIds("all"));
+    return session.trades.some((trade) => getTradeAccountIds(trade, session).some((id) => selectedIds.has(id)));
   }
-  if (session.accountId === accountId) return true;
-  return session.trades.some((trade) => getTradeAccountTargetId(trade, session) === accountId);
+  const selectedIds = new Set(getSelectedAccountIds(accountId));
+  return session.trades.some((trade) => getTradeAccountIds(trade, session).some((id) => selectedIds.has(id)));
 }
 
 function getTradeMultiplier(trade, session) {
@@ -651,71 +664,21 @@ function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
 }
 
 function getSessionNetForFilter(session, accountId = "all") {
+  const selectedIds = new Set(getSelectedAccountIds(accountId));
   return session.trades.reduce((acc, trade) => {
-    const targetId = getTradeAccountTargetId(trade, session);
-    if (accountId === "all" && !isActiveTargetId(targetId)) return acc;
-    if (accountId !== "all" && targetId !== accountId) return acc;
-    const tradeNet = calcTradePnl(trade) * getTradeMultiplier(trade, session);
-    return acc + tradeNet;
+    const tradeAccountIds = getTradeAccountIds(trade, session);
+    const matchedCount = tradeAccountIds.filter((id) => selectedIds.has(id)).length;
+    if (!matchedCount) return acc;
+    return acc + calcTradePnl(trade) * matchedCount;
   }, 0);
 }
 
 function getSessionNetForAccount(session, accountId) {
   return session.trades.reduce((acc, trade) => {
-    const targetId = getTradeAccountTargetId(trade, session);
-    if (targetId !== accountId) return acc;
+    const tradeAccountIds = getTradeAccountIds(trade, session);
+    if (!tradeAccountIds.includes(accountId)) return acc;
     return acc + calcTradePnl(trade);
   }, 0);
-}
-
-function getTptDrawdownContext(selectedId = "all") {
-  if (selectedId === "all") {
-    const tptAccountIds = new Set(state.accounts.filter((account) => account.propFirm === "TPT").map((account) => account.id));
-    const start = state.accounts.reduce((sum, account) => sum + account.startingBalance, 0);
-    const maxDrawdown = state.accounts.reduce((sum, account) => sum + (account.maxDrawdown || 0), 0);
-    return {
-      start,
-      maxDrawdown,
-      staticFloor: start - maxDrawdown,
-      getSessionNet: (session) => session.trades.reduce((acc, trade) => {
-        const targetId = getTradeAccountTargetId(trade, session);
-        if (!tptAccountIds.has(targetId)) return acc;
-        return acc + calcTradePnl(trade);
-      }, 0),
-    };
-  }
-
-  const group = getGroupById(selectedId);
-  if (group) {
-    const members = state.accounts.filter((account) => account.groupId === group.id);
-    const memberIds = new Set(members.map((account) => account.id));
-    const isTptGroup = members.length > 0 && members.every((account) => account.propFirm === "TPT");
-    const start = members.reduce((sum, account) => sum + account.startingBalance, 0);
-    const maxDrawdown = members.reduce((sum, account) => sum + (account.maxDrawdown || 0), 0);
-    return {
-      start,
-      maxDrawdown,
-      staticFloor: start - maxDrawdown,
-      getSessionNet: isTptGroup
-        ? (session) => session.trades.reduce((acc, trade) => {
-          const targetId = getTradeAccountTargetId(trade, session);
-          if (!memberIds.has(targetId)) return acc;
-          return acc + calcTradePnl(trade);
-        }, 0)
-        : () => 0,
-    };
-  }
-
-  const account = getAccountById(selectedId);
-  if (!account) return { start: 0, maxDrawdown: 0, staticFloor: 0, getSessionNet: () => 0 };
-  return {
-    start: account.startingBalance,
-    maxDrawdown: account.maxDrawdown || 0,
-    staticFloor: account.startingBalance - (account.maxDrawdown || 0),
-    getSessionNet: account.propFirm === "TPT"
-      ? (session) => getSessionNetForAccount(session, account.id)
-      : () => 0,
-  };
 }
 
 function calcR(trade) {
@@ -771,10 +734,7 @@ function getSessionTotalNet(session) {
 function getAccountCurrentEquity(accountId) {
   const account = state.accounts.find((item) => item.id === accountId);
   if (!account) return 0;
-  const net = state.sessions.reduce((sum, session) => sum + session.trades.reduce((tradeSum, trade) => {
-    const targetId = getTradeAccountTargetId(trade, session);
-    return targetId === accountId ? tradeSum + calcTradePnl(trade) : tradeSum;
-  }, 0), 0);
+  const net = state.sessions.reduce((sum, session) => sum + getSessionNetForAccount(session, accountId), 0);
   return account.startingBalance + net;
 }
 
@@ -829,14 +789,27 @@ function drawEquity() {
       : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
   const points = [start];
   sessions.forEach((session) => points.push(points.at(-1) + getSessionNetForFilter(session, selectedId)));
-  const drawdownContext = getTptDrawdownContext(selectedId);
-  let tptRunningNet = 0;
-  let tptRunningPeak = 0;
-  const drawdownPoints = [drawdownContext.staticFloor];
+  const selectedAccounts = getSelectedAccountIds(selectedId)
+    .map((id) => getAccountById(id))
+    .filter(Boolean);
+  const drawdownState = new Map(selectedAccounts.map((account) => [account.id, { net: 0, peak: 0 }]));
+  const accountDrawdownFloor = (account) => {
+    const maxDrawdown = Math.max(0, Number(account.maxDrawdown) || 0);
+    const baseFloor = account.startingBalance - maxDrawdown;
+    if (account.propFirm !== "TPT" || maxDrawdown <= 0) return baseFloor;
+    const progress = drawdownState.get(account.id) || { peak: 0 };
+    const trailingOffset = Math.min(maxDrawdown, Math.max(0, progress.peak));
+    return baseFloor + trailingOffset;
+  };
+  const drawdownPoints = [selectedAccounts.reduce((sum, account) => sum + accountDrawdownFloor(account), 0)];
   sessions.forEach((session) => {
-    tptRunningNet += drawdownContext.getSessionNet(session);
-    tptRunningPeak = Math.max(tptRunningPeak, tptRunningNet);
-    drawdownPoints.push(drawdownContext.staticFloor + Math.max(0, tptRunningPeak));
+    selectedAccounts.forEach((account) => {
+      const progress = drawdownState.get(account.id);
+      if (!progress) return;
+      progress.net += getSessionNetForAccount(session, account.id);
+      progress.peak = Math.max(progress.peak, progress.net);
+    });
+    drawdownPoints.push(selectedAccounts.reduce((sum, account) => sum + accountDrawdownFloor(account), 0));
   });
   const labels = ["Start", ...sessions.map((session) => session.date)];
   const min = Math.min(...points, ...drawdownPoints);
