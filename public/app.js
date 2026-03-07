@@ -370,19 +370,9 @@ function archiveAccount(accountId) {
   const archivedAt = todayIso();
   const groupAccountsAtArchive = account.groupId ? getGroupDisplayAccountCount(account.groupId) : 0;
   const archivedAccount = normalizeAccount({ ...account, archivedAt, groupAccountsAtArchive });
-  const fallback = state.accounts.find((item) => item.id !== accountId)?.id || "";
-  const affectedSessionIds = state.sessions.filter((session) => session.accountId === accountId).map((session) => session.id);
   state.accounts.splice(index, 1);
   state.archivedAccounts.unshift(archivedAccount);
-  state.sessions.forEach((session) => {
-    if (session.accountId === accountId) session.accountId = fallback;
-    session.trades.forEach((trade) => {
-      if (getTradeAccountTargetId(trade, session) === accountId) trade.accountId = session.accountId;
-    });
-  });
-  if (uiState.filters.overviewAccountId === accountId) uiState.filters.overviewAccountId = "all";
-  if (uiState.filters.journalAccountId === accountId) uiState.filters.journalAccountId = "all";
-  pushDeletionHistory({ type: "archive-account", account: structuredClone(archivedAccount), index, affectedSessionIds });
+  pushDeletionHistory({ type: "archive-account", account: structuredClone(archivedAccount), index, affectedSessionIds: [] });
 }
 
 function restoreArchivedAccount(accountId) {
@@ -610,13 +600,19 @@ function getTradeAccountIds(trade, session) {
   const targetId = getTradeAccountTargetId(trade, session);
   const group = getGroupById(targetId);
   if (!group) return targetId ? [targetId] : [];
-  return state.accounts.filter((account) => account.groupId === group.id).map((account) => account.id);
+  return [...state.accounts, ...state.archivedAccounts]
+    .filter((account) => account.groupId === group.id)
+    .map((account) => account.id);
 }
 
 function getSelectedAccountIds(accountId = "all") {
-  if (accountId === "all") return state.accounts.map((account) => account.id);
+  if (accountId === "all") return [...state.accounts, ...state.archivedAccounts].map((account) => account.id);
   const group = getGroupById(accountId);
-  if (group) return state.accounts.filter((account) => account.groupId === group.id).map((account) => account.id);
+  if (group) {
+    return [...state.accounts, ...state.archivedAccounts]
+      .filter((account) => account.groupId === group.id)
+      .map((account) => account.id);
+  }
   return [accountId];
 }
 
