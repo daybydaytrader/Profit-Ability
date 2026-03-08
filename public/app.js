@@ -1093,11 +1093,16 @@ function renderJournal() {
             : `<div class="session-actions"><span class="pill">${s.trades.length} trades</span><button data-add-trade="${s.id}">+ Add Trade</button></div>
                <div class="table-wrap"><table><thead><tr><th>Account</th><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Entry Time</th><th>Exit</th><th>Exit Time</th><th>Stop</th><th>Duration</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
         }
-      </article>`;
+      </article>`);
+      return nodes;
     })
     .join("");
 
-  document.getElementById("sessionList").innerHTML = html || '<p class="muted">No sessions yet.</p>';
+  const finalHtml = uiState.dragSession.draggingId && !uiState.dragSession.placeholderId
+    ? `${html}<article class="session-card session-card-placeholder" aria-hidden="true"></article>`
+    : html;
+
+  document.getElementById("sessionList").innerHTML = finalHtml || '<p class="muted">No sessions yet.</p>';
   updateAllCounters();
 }
 
