@@ -156,7 +156,7 @@ button.danger {
   border-radius: 12px;
   padding: 12px;
 }
-.session-top { display: grid; gap: 12px; grid-template-columns: auto 132px 140px minmax(140px,1.55fr) auto auto minmax(180px,2fr) auto; align-items: start; }
+.session-top { display: grid; gap: 12px; grid-template-columns: auto 140px 140px minmax(140px,1.55fr) auto auto minmax(180px,2fr) auto; align-items: start; }
 .session-top label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
 .session-rules { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-top: 10px; }
 .session-rules label { display: grid; gap: 6px; font-size: 0.85rem; color: var(--muted); }
@@ -165,6 +165,15 @@ button.danger {
 
 .date-input {
   width: 132px;
+}
+.day-input {
+  width: 132px;
+}
+.session-date-fields {
+  display: grid;
+  gap: 8px;
+  height: 140px;
+  align-content: space-between;
 }
 .session-link-wrap {
   display: grid;

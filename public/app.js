@@ -35,6 +35,7 @@ const seed = {
     {
       id: "s1",
       date: "2026-02-24",
+      day: "",
       mistakes: "late entry",
       correctDecisions: "Waited for breakout confirmation",
       rules: { r1: true, r2: "Trending" },
@@ -440,9 +441,11 @@ function normalizeGroup(group) {
 }
 
 function normalizeSession(session) {
+  const normalizedDay = String(session.day ?? "").replace(/\D/g, "").slice(0, 3);
   return {
     id: session.id || `s${Date.now()}`,
     date: session.date || new Date().toISOString().slice(0, 10),
+    day: normalizedDay,
     mistakes: String(session.mistakes || "").slice(0, SESSION_TEXT_MAX),
     correctDecisions: String(session.correctDecisions || "").slice(0, SESSION_TEXT_MAX),
     rules: session.rules || {},
@@ -470,6 +473,7 @@ function migrateLegacyToSessions(raw) {
     const grouped = raw.sessions.map((s) => ({
       id: s.id,
       date: s.date || new Date().toISOString().slice(0, 10),
+      day: s.day || "",
       mistakes: s.mistakes || "",
       correctDecisions: s.correctDecisions || "",
       rules: s.rules || {},
@@ -1041,10 +1045,15 @@ function renderJournal() {
       <article class="session-card">
         <div class="session-top">
           <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
-          <label>Date
-            <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
-          </label>
-                    <div class="session-link-wrap">
+          <div class="session-date-fields">
+            <label>Date
+              <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
+            </label>
+            <label>Day
+              <input class="day-input" type="number" min="1" step="1" inputmode="numeric" data-session-k="day" data-session-id="${s.id}" value="${s.day || ""}" placeholder="e.g. 12"/>
+            </label>
+          </div>
+          <div class="session-link-wrap">
             ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="session-link-play" data-play-link="${s.id}" title="Open video" aria-label="Open YouTube video">▶</span><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty session-link-card" data-open-link="${s.id}">Add Link</button>`}
           </div>
           <label class="field-with-counter">Mistakes
@@ -1589,6 +1598,7 @@ function addSession() {
     normalizeSession({
       id: `s${Date.now()}`,
       date: new Date().toISOString().slice(0, 10),
+      day: "",
       mistakes: "",
       correctDecisions: "",
       rules: {},
@@ -2152,9 +2162,9 @@ function updateSessionField(target) {
 
   if (target.dataset.sessionK) {
     const key = target.dataset.sessionK;
-    session[key] = ["mistakes", "correctDecisions"].includes(key)
-      ? String(target.value).slice(0, SESSION_TEXT_MAX)
-      : target.value;
+    if (["mistakes", "correctDecisions"].includes(key)) session[key] = String(target.value).slice(0, SESSION_TEXT_MAX);
+    else if (key === "day") session.day = String(target.value || "").replace(/\D/g, "").slice(0, 3);
+    else session[key] = target.value;
   }
 
   if (target.dataset.sessionRule) {
