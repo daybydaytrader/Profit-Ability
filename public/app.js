@@ -102,10 +102,6 @@ const uiState = {
     journalFrom: "",
     journalTo: "",
   },
-  dragSession: {
-    draggingId: "",
-    placeholderId: "",
-  },
   groupsView: "active",
   imageEditor: {
     visible: false,
@@ -444,7 +440,6 @@ function normalizeGroup(group) {
 }
 
 function normalizeSession(session) {
-  const parsedDay = Number(session.day);
   return {
     id: session.id || `s${Date.now()}`,
     date: session.date || new Date().toISOString().slice(0, 10),
@@ -465,7 +460,6 @@ function normalizeSession(session) {
       thumbnail: String(session.videoLink?.thumbnail || ""),
     },
     collapsed: Boolean(session.collapsed),
-    day: Number.isFinite(parsedDay) && parsedDay >= 0 ? Math.floor(parsedDay) : "",
     trades: Array.isArray(session.trades) ? session.trades.map(normalizeTrade) : [],
   };
 }
@@ -537,7 +531,7 @@ function loadState() {
     archivedGroups,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
-    sessions: sessions.length ? sessions : structuredClone(seed.sessions),
+    sessions: (sessions.length ? sessions : structuredClone(seed.sessions)).sort(compareSessionDatesDesc),
     customSymbols,
   };
 }
@@ -639,7 +633,8 @@ function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
       if (from && session.date < from) return false;
       if (to && session.date > to) return false;
       return true;
-    });
+    })
+    .sort(compareSessionDatesDesc);
 }
 
 function getSessionNetForFilter(session, accountId = "all") {
@@ -1038,32 +1033,18 @@ function renderJournal() {
     from: uiState.filters.journalFrom,
     to: uiState.filters.journalTo,
   });
-  const sourceSessions = uiState.dragSession.draggingId
-    ? filteredSessions.filter((session) => session.id !== uiState.dragSession.draggingId)
-    : filteredSessions;
-
-  const html = sourceSessions
-    .flatMap((s) => {
-      const nodes = [];
-      if (uiState.dragSession.placeholderId === s.id) {
-        nodes.push('<article class="session-card session-card-placeholder" aria-hidden="true"></article>');
-      }
+  const html = filteredSessions
+    .map((s) => {
       const net = getSessionNet(s);
       const adherence = getSessionRuleAdherence(s);
-      nodes.push(`
-      <article class="session-card" data-session-card="${s.id}" draggable="true">
+      return `
+      <article class="session-card">
         <div class="session-top">
-          <div class="session-drag-handle" title="Drag to reorder">⋮⋮</div>
           <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
-          <div class="session-date-day">
-            <label>Date
-              <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
-            </label>
-            <label>Day
-              <input type="number" min="0" step="1" data-session-k="day" data-session-id="${s.id}" value="${s.day === "" ? "" : s.day}" placeholder="e.g. 1" />
-            </label>
-          </div>
-          <div class="session-link-wrap">
+          <label>Date
+            <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
+          </label>
+                    <div class="session-link-wrap">
             ${s.videoLink?.url ? `<button type="button" class="session-shot session-link-card" data-open-link="${s.id}" title="Edit video link"><span class="session-link-play" data-play-link="${s.id}" title="Open video" aria-label="Open YouTube video">▶</span><span class="link-title">${escapeHtml(s.videoLink.title || "YouTube Video")}</span>${s.videoLink.thumbnail ? `<img src="${escapeHtml(s.videoLink.thumbnail)}" alt="Linked video thumbnail"/>` : `<span class="link-thumb-fallback">No thumbnail</span>`}</button>` : `<button type="button" class="session-shot session-shot-empty session-link-card" data-open-link="${s.id}">Add Link</button>`}
           </div>
           <label class="field-with-counter">Mistakes
@@ -1097,16 +1078,11 @@ function renderJournal() {
             : `<div class="session-actions"><span class="pill">${s.trades.length} trades</span><button data-add-trade="${s.id}">+ Add Trade</button></div>
                <div class="table-wrap"><table><thead><tr><th>Account</th><th>Symbol</th><th>Setup</th><th>Type</th><th>Size</th><th>Entry</th><th>Entry Time</th><th>Exit</th><th>Exit Time</th><th>Stop</th><th>Duration</th><th>R</th><th>PnL</th><th>Actions</th></tr></thead><tbody>${renderSessionTrades(s)}</tbody></table></div>`
         }
-      </article>`);
-      return nodes;
+      </article>`;
     })
     .join("");
 
-  const finalHtml = uiState.dragSession.draggingId && !uiState.dragSession.placeholderId
-    ? `${html}<article class="session-card session-card-placeholder" aria-hidden="true"></article>`
-    : html;
-
-  document.getElementById("sessionList").innerHTML = finalHtml || '<p class="muted">No sessions yet.</p>';
+  document.getElementById("sessionList").innerHTML = html || '<p class="muted">No sessions yet.</p>';
   updateAllCounters();
 }
 
@@ -1618,10 +1594,10 @@ function addSession() {
       rules: {},
       accountId: state.accounts[0]?.id || "",
       collapsed: true,
-      day: "",
       trades: [],
     })
   );
+  state.sessions.sort(compareSessionDatesDesc);
   rerender();
 }
 
@@ -2141,7 +2117,7 @@ function importBackupFile(file) {
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
-      state.sessions = migrated.sessions.map(normalizeSession);
+      state.sessions = migrated.sessions.map(normalizeSession).sort(compareSessionDatesDesc);
       state.customSymbols = Array.isArray(migrated.customSymbols) ? migrated.customSymbols.map(normalizeCustomSymbol).filter(Boolean) : [];
       rerender();
     } catch (err) {
@@ -2157,7 +2133,7 @@ function resetToDemo() {
   state.archivedGroups = structuredClone(seed.archivedGroups || []);
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
-  state.sessions = structuredClone(seed.sessions);
+  state.sessions = structuredClone(seed.sessions).sort(compareSessionDatesDesc);
   state.customSymbols = [];
   rerender();
 }
@@ -2178,9 +2154,7 @@ function updateSessionField(target) {
     const key = target.dataset.sessionK;
     session[key] = ["mistakes", "correctDecisions"].includes(key)
       ? String(target.value).slice(0, SESSION_TEXT_MAX)
-      : key === "day"
-        ? (target.value === "" ? "" : Math.max(0, Math.floor(Number(target.value) || 0)))
-        : target.value;
+      : target.value;
   }
 
   if (target.dataset.sessionRule) {
@@ -2189,20 +2163,7 @@ function updateSessionField(target) {
     else session.rules[rid] = target.value;
   }
 
-}
-
-function moveSessionCard(draggedId, targetId) {
-  if (!draggedId || !targetId || draggedId === targetId) return;
-  const from = state.sessions.findIndex((session) => session.id === draggedId);
-  const to = state.sessions.findIndex((session) => session.id === targetId);
-  if (from === -1 || to === -1) return;
-  const [moved] = state.sessions.splice(from, 1);
-  state.sessions.splice(to, 0, moved);
-}
-
-function resetSessionDragState() {
-  uiState.dragSession.draggingId = "";
-  uiState.dragSession.placeholderId = "";
+  state.sessions.sort(compareSessionDatesDesc);
 }
 
 function updateTradeField(target, formatDisplay = false) {
@@ -2549,66 +2510,6 @@ document.getElementById("sessionList").addEventListener("click", (e) => {
     openDeleteEntityModal("trade", { sessionId: parentSessionId, tradeId });
   }
 });
-
-document.getElementById("sessionList").addEventListener("dragstart", (e) => {
-  const card = e.target.closest("[data-session-card]");
-  if (!card) return;
-  if (e.target.closest("input, textarea, select, button, a, img")) {
-    e.preventDefault();
-    return;
-  }
-  const sessionId = card.dataset.sessionCard;
-  uiState.dragSession.draggingId = sessionId;
-  uiState.dragSession.placeholderId = sessionId;
-  card.classList.add("session-card-dragging");
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", sessionId);
-    const preview = card.cloneNode(true);
-    preview.style.width = `${card.offsetWidth}px`;
-    preview.style.transform = "scale(1.04)";
-    preview.style.transformOrigin = "top left";
-    preview.style.pointerEvents = "none";
-    preview.style.position = "absolute";
-    preview.style.top = "-9999px";
-    preview.style.left = "-9999px";
-    document.body.appendChild(preview);
-    e.dataTransfer.setDragImage(preview, 24, 24);
-    setTimeout(() => preview.remove(), 0);
-  }
-  renderJournal();
-});
-
-document.getElementById("sessionList").addEventListener("dragover", (e) => {
-  if (!uiState.dragSession.draggingId) return;
-  e.preventDefault();
-  const card = e.target.closest("[data-session-card]");
-  if (!card) {
-    if (uiState.dragSession.placeholderId !== "") {
-      uiState.dragSession.placeholderId = "";
-      renderJournal();
-    }
-    return;
-  }
-  const targetId = card.dataset.sessionCard;
-  if (!targetId || targetId === uiState.dragSession.draggingId) return;
-  if (uiState.dragSession.placeholderId === targetId) return;
-  uiState.dragSession.placeholderId = targetId;
-  moveSessionCard(uiState.dragSession.draggingId, targetId);
-  renderJournal();
-});
-
-document.getElementById("sessionList").addEventListener("drop", (e) => {
-  if (!uiState.dragSession.draggingId) return;
-  e.preventDefault();
-});
-
-document.getElementById("sessionList").addEventListener("dragend", () => {
-  if (!uiState.dragSession.draggingId) return;
-  resetSessionDragState();
-  rerender();
-});
-
 
 
 document.getElementById("saveLinkBtn").addEventListener("click", saveLinkFromModal);
