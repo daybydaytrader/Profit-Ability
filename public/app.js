@@ -1038,15 +1038,19 @@ function renderJournal() {
     from: uiState.filters.journalFrom,
     to: uiState.filters.journalTo,
   });
-  const html = filteredSessions
-    .map((s) => {
-      if (uiState.dragSession.draggingId === s.id && uiState.dragSession.placeholderId) {
-        return '<article class="session-card session-card-placeholder" aria-hidden="true"></article>';
-      }
+  const sourceSessions = uiState.dragSession.draggingId
+    ? filteredSessions.filter((session) => session.id !== uiState.dragSession.draggingId)
+    : filteredSessions;
 
+  const html = sourceSessions
+    .flatMap((s) => {
+      const nodes = [];
+      if (uiState.dragSession.placeholderId === s.id) {
+        nodes.push('<article class="session-card session-card-placeholder" aria-hidden="true"></article>');
+      }
       const net = getSessionNet(s);
       const adherence = getSessionRuleAdherence(s);
-      return `
+      nodes.push(`
       <article class="session-card" data-session-card="${s.id}" draggable="true">
         <div class="session-top">
           <div class="session-drag-handle" title="Drag to reorder">⋮⋮</div>
