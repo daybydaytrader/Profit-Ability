@@ -647,6 +647,17 @@ input, select, button, textarea {
   padding: 7px;
 }
 button { cursor: pointer; font-weight: 600; }
+
+button.success {
+  background: #2f7a4f;
+  border-color: #4fb57a;
+  color: #e9fff1;
+}
+
+button.success:hover {
+  background: #3a9360;
+}
+
 .rule-form { display: grid; gap: 8px; grid-template-columns: 2fr 1fr 1.5fr auto; }
 .rule-form-single { grid-template-columns: auto; justify-content: start; }
 .rule-list { padding-left: 18px; }
@@ -773,6 +784,17 @@ button { cursor: pointer; font-weight: 600; }
   display: grid;
   gap: 8px;
 }
+
+
+.past-account-section {
+  display: grid;
+  gap: 8px;
+}
+
+.past-account-section h4 {
+  margin: 6px 0 0;
+}
+
 .account-row {
   border: 1px solid var(--line);
   border-radius: 10px;
