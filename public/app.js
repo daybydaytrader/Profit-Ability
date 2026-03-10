@@ -292,6 +292,7 @@ function normalizeAccount(account) {
   const maxDrawdown = Number(account?.maxDrawdown);
   const createdAt = String(account?.createdAt || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
   const archivedAtRaw = String(account?.archivedAt || "").slice(0, 10);
+  const archivedReason = account?.archivedReason === "passed" ? "passed" : (archivedAtRaw ? "blown" : "");
   return {
     id: account?.id || `acc${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
     name: name || "Account",
@@ -301,6 +302,7 @@ function normalizeAccount(account) {
     propFirm: String(account?.propFirm || ""),
     createdAt,
     archivedAt: archivedAtRaw,
+    archivedReason,
     groupAccountsAtArchive: Math.max(0, Math.floor(Number(account?.groupAccountsAtArchive) || 0)),
   };
 }
@@ -364,13 +366,13 @@ function formatAgeRange(account) {
   return "—";
 }
 
-function archiveAccount(accountId) {
+function archiveAccount(accountId, reason = "blown") {
   const index = state.accounts.findIndex((account) => account.id === accountId);
   const account = state.accounts[index];
   if (index < 0 || !account) return;
   const archivedAt = todayIso();
   const groupAccountsAtArchive = account.groupId ? getGroupDisplayAccountCount(account.groupId) : 0;
-  const archivedAccount = normalizeAccount({ ...account, archivedAt, groupAccountsAtArchive });
+  const archivedAccount = normalizeAccount({ ...account, archivedAt, archivedReason: reason === "passed" ? "passed" : "blown", groupAccountsAtArchive });
   const fallback = state.accounts.find((item) => item.id !== accountId)?.id || "";
   const affectedSessionIds = state.sessions.filter((session) => session.accountId === accountId).map((session) => session.id);
   state.accounts.splice(index, 1);
@@ -386,12 +388,29 @@ function archiveAccount(accountId) {
   pushDeletionHistory({ type: "archive-account", account: structuredClone(archivedAccount), index, affectedSessionIds });
 }
 
+function passAccount(accountId) {
+  const account = state.accounts.find((item) => item.id === accountId);
+  if (!account) return;
+  const accountSnapshot = snapshotFromAccount(account);
+  const groupId = account.groupId;
+  archiveAccount(accountId, "passed");
+  if (!groupId) return;
+  const group = getActiveGroupById(groupId);
+  if (!group) return;
+  const activeMembers = state.accounts.filter((item) => item.groupId === groupId).map(snapshotFromAccount);
+  group.memberSnapshots = mergeGroupMemberSnapshots(group.memberSnapshots || [], [...activeMembers, accountSnapshot]);
+  state.accounts.forEach((item) => {
+    if (item.groupId === groupId) item.groupId = "";
+  });
+  archiveGroup(groupId);
+}
+
 function restoreArchivedAccount(accountId) {
   const index = state.archivedAccounts.findIndex((account) => account.id === accountId);
   const account = state.archivedAccounts[index];
   if (index < 0 || !account) return;
   state.archivedAccounts.splice(index, 1);
-  state.accounts.push(normalizeAccount({ ...account, archivedAt: "" }));
+  state.accounts.push(normalizeAccount({ ...account, archivedAt: "", archivedReason: "" }));
 }
 
 function archiveGroup(groupId) {
@@ -881,15 +900,18 @@ function renderAccounts() {
 
   if (list) {
     if (uiState.accountsView === "past") {
-      list.innerHTML = state.archivedAccounts.length
-        ? state.archivedAccounts
+      const passedAccounts = state.archivedAccounts.filter((account) => account.archivedReason === "passed");
+      const blownAccounts = state.archivedAccounts.filter((account) => account.archivedReason !== "passed");
+      const renderPastRows = (accounts) => (accounts.length
+        ? accounts
             .map((account) => `<article class="account-thin-card" data-open-archived-account="${account.id}"><span class="account-line"><strong>${escapeHtml(account.name)}</strong> · $${formatWithThousands(account.startingBalance, 0)} · ${escapeHtml(account.groupId ? `${accountTargetLabel(account.groupId).replace(/ \(Group.+/, "")} (Group • ${Math.max(1, account.groupAccountsAtArchive || getGroupDisplayAccountCount(account.groupId))} accounts)` : "No group")} · ${escapeHtml(formatAgeRange(account))}</span><button type="button" data-restore-account="${account.id}">Restore</button></article>`)
             .join("")
-        : '<div class="muted small">No past accounts yet.</div>';
+        : '<div class="muted small">None yet.</div>');
+      list.innerHTML = `<div class="past-account-section"><h4>Passed Accounts</h4>${renderPastRows(passedAccounts)}</div><div class="past-account-section"><h4>Blown Accounts</h4>${renderPastRows(blownAccounts)}</div>`;
     } else {
       list.innerHTML = state.accounts.length
         ? state.accounts
-            .map((account) => `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="danger" data-blowup-account="${account.id}">Blow Up</button> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Firm: ${escapeHtml(account.propFirm || "—")}</p><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p></article>`)
+            .map((account) => `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="success" data-pass-account="${account.id}">Pass</button> <button type="button" class="danger" data-blowup-account="${account.id}">Blow Up</button> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Firm: ${escapeHtml(account.propFirm || "—")}</p><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p></article>`)
             .join("")
         : '<div class="muted small">No active accounts yet.</div>';
     }
@@ -2266,6 +2288,12 @@ document.getElementById("accountsList").addEventListener("click", (e) => {
   const blowupId = e.target.closest("[data-blowup-account]")?.dataset.blowupAccount;
   if (blowupId) {
     archiveAccount(blowupId);
+    rerender();
+    return;
+  }
+  const passId = e.target.closest("[data-pass-account]")?.dataset.passAccount;
+  if (passId) {
+    passAccount(passId);
     rerender();
     return;
   }
