@@ -394,30 +394,14 @@ function restoreArchivedAccount(accountId) {
   state.accounts.push(normalizeAccount({ ...account, archivedAt: "" }));
 }
 
-function evaluateAccountDrawdowns() {
-  const blown = state.accounts.filter((account) => {
-    const currentEquity = getAccountCurrentEquity(account.id);
-    const drawdown = account.startingBalance - currentEquity;
-    return account.maxDrawdown > 0 && drawdown >= account.maxDrawdown;
-  });
-  blown.forEach((account) => archiveAccount(account.id));
-}
-
-function evaluateGroupLiveness() {
-  const emptyGroups = state.groups.filter((group) => {
-    const activeCount = state.accounts.filter((account) => account.groupId === group.id).length;
-    const hadMembers = (group.maxAccounts || 0) > 0 || (group.memberSnapshots || []).length > 0;
-    return activeCount === 0 && hadMembers;
-  });
-  if (!emptyGroups.length) return;
+function archiveGroup(groupId) {
+  const index = state.groups.findIndex((group) => group.id === groupId);
+  const group = state.groups[index];
+  if (index < 0 || !group) return;
   const archivedAt = todayIso();
-  emptyGroups.forEach((group) => {
-    const index = state.groups.findIndex((item) => item.id === group.id);
-    if (index < 0) return;
-    const archived = normalizeGroup({ ...group, archivedAt, maxAccounts: Math.max(group.maxAccounts || 0, 1) });
-    state.groups.splice(index, 1);
-    state.archivedGroups.unshift(archived);
-  });
+  const archived = normalizeGroup({ ...group, archivedAt, maxAccounts: Math.max(group.maxAccounts || 0, 1) });
+  state.groups.splice(index, 1);
+  state.archivedGroups.unshift(archived);
 }
 
 function refreshGroupMaxAccounts() {
@@ -919,7 +903,7 @@ function renderAccounts() {
           : '<div class="muted small">No past groups yet.</div>')
       : (state.groups.length
           ? state.groups
-              .map((group) => `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Click to view/edit members.</p></article>`)
+              .map((group) => `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-blowup-group="${group.id}">Blow Up</button> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Click to view/edit members.</p></article>`)
               .join("")
           : '<div class="muted small">No current groups yet.</div>');
   }
@@ -1579,9 +1563,7 @@ function closeImageModal() {
 }
 
 function rerender() {
-  evaluateAccountDrawdowns();
   refreshGroupMaxAccounts();
-  evaluateGroupLiveness();
   saveState();
   renderFilterSelects();
   renderOverview();
@@ -2297,6 +2279,12 @@ document.getElementById("accountsList").addEventListener("click", (e) => {
   openAccountEntityModal("account", accountId);
 });
 document.getElementById("groupsList").addEventListener("click", (e) => {
+  const blowupId = e.target.closest("[data-blowup-group]")?.dataset.blowupGroup;
+  if (blowupId) {
+    archiveGroup(blowupId);
+    rerender();
+    return;
+  }
   const removeId = e.target.closest("[data-remove-group]")?.dataset.removeGroup;
   if (removeId) {
     openDeleteEntityModal("group", removeId);
