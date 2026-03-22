@@ -37,6 +37,8 @@ Open: <http://localhost:4173>
 - PnL and Net are displayed in USD (prefixed with `$`).
 - Rule checkbox-type values are rectangular red/green toggle buttons with the rule label inside the button.
 - Session textareas expand on hover/focus to reveal full text and stay expanded while focused.
+- Journal remains the place for session CRUD, date/account filtering, and full trade/rule editing.
+- Symbols are managed from the dedicated **Symbols** tab, and custom symbols cannot be removed there while Journal trades still reference them.
 
 ## What you can test visually
 
