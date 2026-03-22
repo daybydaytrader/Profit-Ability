@@ -1222,6 +1222,65 @@ function renderSessionCards(sessions, emptyMessage = "No sessions yet.") {
     .join("") || `<p class="muted">${escapeHtml(emptyMessage)}</p>`;
 }
 
+const SESSION_VIEW_CONFIG = {
+  journal: {
+    listId: "sessionList",
+    emptyMessage: "No sessions yet.",
+    getSessions: () => getFilteredSessions({
+      accountId: uiState.filters.journalAccountId,
+      from: uiState.filters.journalFrom,
+      to: uiState.filters.journalTo,
+    }),
+  },
+  "day-modal": {
+    listId: "daySessionsModalList",
+    emptyMessage: "No sessions match this day.",
+    getSessions: () => getDaySessionsModalSessions(uiState.daySessionsModalDate),
+  },
+};
+
+function getSessionViewConfig(mode) {
+  return SESSION_VIEW_CONFIG[mode] || SESSION_VIEW_CONFIG.journal;
+}
+
+function renderCustomSymbolList() {
+  const customList = document.getElementById("customSymbolList");
+  if (!customList) return;
+  customList.innerHTML = state.customSymbols.length
+    ? state.customSymbols
+        .map((item) => `<li><strong>${escapeHtml(item.ticker)}</strong> • tick ${item.tickSize} • $${item.tickValue}/tick <button type="button" data-del-symbol="${item.ticker}">Remove</button></li>`)
+        .join("")
+    : '<li class="muted">No custom symbols yet.</li>';
+}
+
+function renderSessionView(mode) {
+  const config = getSessionViewConfig(mode);
+  const list = document.getElementById(config.listId);
+  if (!list) return;
+  list.innerHTML = renderSessionCards(config.getSessions(), config.emptyMessage);
+  updateAllCounters();
+}
+
+function renderSessionViews(modes = ["journal", "day-modal"]) {
+  const requestedModes = Array.isArray(modes) && modes.length ? modes : ["journal", "day-modal"];
+  const uniqueModes = [...new Set(requestedModes)];
+  if (uniqueModes.includes("journal")) renderCustomSymbolList();
+  uniqueModes.forEach((mode) => renderSessionView(mode));
+}
+
+function getSessionModeFromContainer(container) {
+  if (!container?.id) return null;
+  if (container.id === "sessionList") return "journal";
+  if (container.id === "daySessionsModalList") return "day-modal";
+  return null;
+}
+
+function getCompanionSessionModes(sourceMode) {
+  if (sourceMode === "journal") return ["day-modal"];
+  if (sourceMode === "day-modal") return ["journal"];
+  return ["journal", "day-modal"];
+}
+
 function getDaySessionsModalSessions(date) {
   return getFilteredSessions({ accountId: uiState.filters.overviewAccountId }).filter((session) => session.date === date);
 }
@@ -1242,10 +1301,9 @@ function renderDaySessionsModal() {
   }
   title.textContent = `Sessions for ${date}`;
   addButton.hidden = false;
-  list.innerHTML = renderSessionCards(getDaySessionsModalSessions(date), "No sessions match this day.");
+  renderSessionView("day-modal");
   modal.hidden = false;
   document.body.style.overflow = "hidden";
-  updateAllCounters();
 }
 
 function openDaySessionsModal(date) {
@@ -1260,22 +1318,7 @@ function closeDaySessionsModal() {
 }
 
 function renderJournal() {
-  const customList = document.getElementById("customSymbolList");
-  if (customList) {
-    customList.innerHTML = state.customSymbols.length
-      ? state.customSymbols
-          .map((item) => `<li><strong>${escapeHtml(item.ticker)}</strong> • tick ${item.tickSize} • $${item.tickValue}/tick <button type="button" data-del-symbol="${item.ticker}">Remove</button></li>`)
-          .join("")
-      : '<li class="muted">No custom symbols yet.</li>';
-  }
-  const filteredSessions = getFilteredSessions({
-    accountId: uiState.filters.journalAccountId,
-    from: uiState.filters.journalFrom,
-    to: uiState.filters.journalTo,
-  });
-
-  document.getElementById("sessionList").innerHTML = renderSessionCards(filteredSessions);
-  updateAllCounters();
+  renderSessionViews(["journal"]);
 }
 
 function renderRules() {
@@ -2379,10 +2422,12 @@ function updateTradeField(target, formatDisplay = false) {
     trade.entry = snapPriceToSymbol(trade.entry, trade.symbol);
     trade.exit = snapPriceToSymbol(trade.exit, trade.symbol);
     if (formatDisplay) {
-      const entryInput = document.querySelector(`[data-trade-k="entry"][data-trade-id="${trade.id}"]`);
-      const exitInput = document.querySelector(`[data-trade-k="exit"][data-trade-id="${trade.id}"]`);
-      if (entryInput) entryInput.value = formatTradePrice(trade.entry, trade.symbol);
-      if (exitInput) exitInput.value = formatTradePrice(trade.exit, trade.symbol);
+      document.querySelectorAll(`[data-trade-k="entry"][data-trade-id="${trade.id}"]`).forEach((entryInput) => {
+        entryInput.value = formatTradePrice(trade.entry, trade.symbol);
+      });
+      document.querySelectorAll(`[data-trade-k="exit"][data-trade-id="${trade.id}"]`).forEach((exitInput) => {
+        exitInput.value = formatTradePrice(trade.exit, trade.symbol);
+      });
     }
   } else trade[key] = target.value;
 
@@ -2405,36 +2450,38 @@ function updateTradeComputedUI(sessionId, tradeId) {
   const pnl = calcTradePnl(trade);
   const r = calcR(trade);
 
-  const pnlCell = document.querySelector(`[data-trade-pnl="${tradeId}"]`);
-  if (pnlCell) {
-    const multiplier = getTradeMultiplier(trade, session);
-    const totalPnl = pnl * multiplier;
-    const tradeTargetId = getTradeAccountTargetId(trade, session);
+  const multiplier = getTradeMultiplier(trade, session);
+  const totalPnl = pnl * multiplier;
+  const tradeTargetId = getTradeAccountTargetId(trade, session);
+
+  document.querySelectorAll(`[data-trade-pnl="${tradeId}"]`).forEach((pnlCell) => {
     pnlCell.innerHTML = `$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">${escapeHtml(accountTargetLabel(tradeTargetId))}: $${totalPnl.toFixed(2)}</div>` : ""}`;
     pnlCell.classList.toggle("good", totalPnl >= 0);
     pnlCell.classList.toggle("bad", totalPnl < 0);
-  }
+  });
 
-  const durationCell = document.querySelector(`[data-trade-duration="${tradeId}"]`);
-  if (durationCell) durationCell.textContent = calcTradeDuration(trade);
+  document.querySelectorAll(`[data-trade-duration="${tradeId}"]`).forEach((durationCell) => {
+    durationCell.textContent = calcTradeDuration(trade);
+  });
 
-  const rCell = document.querySelector(`[data-trade-r="${tradeId}"]`);
-  if (rCell) rCell.textContent = r.toFixed(1);
+  document.querySelectorAll(`[data-trade-r="${tradeId}"]`).forEach((rCell) => {
+    rCell.textContent = r.toFixed(1);
+  });
 
   const net = getSessionNet(session);
-  const netEl = document.querySelector(`[data-session-net="${sessionId}"]`);
-  if (netEl) {
+  document.querySelectorAll(`[data-session-net="${sessionId}"]`).forEach((netEl) => {
     netEl.textContent = `$${net.toFixed(2)}`;
     netEl.classList.toggle("good", net >= 0);
     netEl.classList.toggle("bad", net < 0);
-  }
+  });
 }
 
-function refreshAnalyticsOnly() {
+function syncSessionViewsFromState(sourceContainer, { includeOverview = true, includeMistakes = true, rerenderSource = false } = {}) {
   saveState();
-  renderOverview();
-  renderDaySessionsModal();
-  renderMistakes();
+  if (includeOverview) renderOverview();
+  const sourceMode = getSessionModeFromContainer(sourceContainer);
+  renderSessionViews(rerenderSource ? [sourceMode] : getCompanionSessionModes(sourceMode));
+  if (includeMistakes) renderMistakes();
 }
 
 document.getElementById("navTabs").addEventListener("click", (e) => {
@@ -2618,18 +2665,17 @@ document.addEventListener("input", (e) => {
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
     if (t.dataset.sessionK === "date") {
-      renderJournal();
-      refreshAnalyticsOnly();
+      syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: false });
       return;
     }
     if (t.tagName === "TEXTAREA") updateAllCounters();
-    refreshAnalyticsOnly();
+    syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: false });
   }
 
   if (t.dataset.tradeK) {
     const updated = updateTradeField(t, false);
     if (updated) updateTradeComputedUI(updated.session.id, updated.trade.id);
-    refreshAnalyticsOnly();
+    syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: false });
   }
 });
 
@@ -2666,18 +2712,17 @@ document.addEventListener("change", (e) => {
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
     if (t.dataset.sessionK === "date") {
-      renderJournal();
-      refreshAnalyticsOnly();
+      syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: true });
       return;
     }
     if (t.tagName === "TEXTAREA") updateAllCounters();
-    refreshAnalyticsOnly();
+    syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: false });
   }
 
   if (t.dataset.tradeK) {
     const updated = updateTradeField(t, true);
     if (updated) updateTradeComputedUI(updated.session.id, updated.trade.id);
-    refreshAnalyticsOnly();
+    syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: false });
   }
 });
 
@@ -2724,7 +2769,8 @@ document.addEventListener("click", (e) => {
 
   const uploadShotId = e.target.closest("[data-upload-shot]")?.dataset.uploadShot;
   if (uploadShotId) {
-    const fileInput = document.querySelector(`[data-session-shot-input="${uploadShotId}"]`);
+    const sessionCard = e.target.closest(".session-card");
+    const fileInput = sessionCard?.querySelector(`[data-session-shot-input="${uploadShotId}"]`) || document.querySelector(`[data-session-shot-input="${uploadShotId}"]`);
     if (fileInput) fileInput.click();
     return;
   }
