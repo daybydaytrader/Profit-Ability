@@ -908,7 +908,9 @@ button.success:hover {
 .day-sessions-modal-content .session-shot-wrap {
   width: 168px;
   min-width: 168px;
-  justify-self: center;
+  align-self: start;
+  align-content: start;
+  justify-self: start;
 }
 .day-sessions-modal-content .session-shot.session-link-card,
 .day-sessions-modal-content .session-shot-empty.session-link-card,
