@@ -879,6 +879,145 @@ button.success:hover {
   backdrop-filter: blur(8px);
 }
 
+.day-sessions-modal-content {
+  width: min(1740px, 99vw);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+  padding-top: 52px;
+  display: grid;
+  gap: 16px;
+}
+.day-sessions-modal-content h3 {
+  margin: 0;
+  text-align: center;
+}
+.day-sessions-modal-content #daySessionsModalList {
+  margin-top: 0;
+}
+.day-sessions-modal-content .session-top {
+  grid-template-columns: auto 150px 168px minmax(260px, 1fr) 168px minmax(190px, 220px) minmax(260px, 1fr) auto;
+  align-items: start;
+}
+.day-sessions-modal-content .session-date-fields {
+  height: auto;
+  min-height: 168px;
+  align-content: stretch;
+}
+.day-sessions-modal-content .session-link-wrap,
+.day-sessions-modal-content .session-shot-wrap {
+  width: 168px;
+  min-width: 168px;
+  justify-self: center;
+}
+.day-sessions-modal-content .session-shot.session-link-card,
+.day-sessions-modal-content .session-shot-empty.session-link-card,
+.day-sessions-modal-content .session-shot,
+.day-sessions-modal-content .session-shot-empty {
+  width: 168px;
+  height: 168px;
+}
+.day-sessions-modal-content .net-result-wrap {
+  min-width: 190px;
+}
+.day-sessions-modal-content .session-top > .field-with-counter {
+  height: 100%;
+}
+.day-sessions-modal-content .session-top > .field-with-counter .session-input {
+  min-height: 168px;
+}
+.day-sessions-modal-content .session-top-actions {
+  align-self: start;
+  min-width: 120px;
+  justify-content: flex-start;
+}
+.day-sessions-modal-content .table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.day-sessions-modal-content .table-wrap table {
+  table-layout: fixed;
+  font-size: 0.78rem;
+}
+.day-sessions-modal-content .table-wrap th,
+.day-sessions-modal-content .table-wrap td {
+  padding: 6px 4px;
+}
+.day-sessions-modal-content .table-wrap th:nth-child(1),
+.day-sessions-modal-content .table-wrap td:nth-child(1) { width: 9%; }
+.day-sessions-modal-content .table-wrap th:nth-child(2),
+.day-sessions-modal-content .table-wrap td:nth-child(2) { width: 7%; }
+.day-sessions-modal-content .table-wrap th:nth-child(3),
+.day-sessions-modal-content .table-wrap td:nth-child(3) { width: 8%; }
+.day-sessions-modal-content .table-wrap th:nth-child(4),
+.day-sessions-modal-content .table-wrap td:nth-child(4) { width: 6%; }
+.day-sessions-modal-content .table-wrap th:nth-child(5),
+.day-sessions-modal-content .table-wrap td:nth-child(5),
+.day-sessions-modal-content .table-wrap th:nth-child(6),
+.day-sessions-modal-content .table-wrap td:nth-child(6),
+.day-sessions-modal-content .table-wrap th:nth-child(7),
+.day-sessions-modal-content .table-wrap td:nth-child(7),
+.day-sessions-modal-content .table-wrap th:nth-child(8),
+.day-sessions-modal-content .table-wrap td:nth-child(8),
+.day-sessions-modal-content .table-wrap th:nth-child(9),
+.day-sessions-modal-content .table-wrap td:nth-child(9),
+.day-sessions-modal-content .table-wrap th:nth-child(10),
+.day-sessions-modal-content .table-wrap td:nth-child(10),
+.day-sessions-modal-content .table-wrap th:nth-child(11),
+.day-sessions-modal-content .table-wrap td:nth-child(11),
+.day-sessions-modal-content .table-wrap th:nth-child(12),
+.day-sessions-modal-content .table-wrap td:nth-child(12) { width: 6%; }
+.day-sessions-modal-content .table-wrap th:nth-child(13),
+.day-sessions-modal-content .table-wrap td:nth-child(13) { width: 8%; }
+.day-sessions-modal-content .table-wrap th:nth-child(14),
+.day-sessions-modal-content .table-wrap td:nth-child(14) { width: 7%; }
+.day-sessions-modal-content .table-wrap input,
+.day-sessions-modal-content .table-wrap select,
+.day-sessions-modal-content .table-wrap button {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.78rem;
+  padding: 6px 5px;
+}
+
+@media (max-width: 1480px) {
+  .day-sessions-modal-content {
+    width: min(1480px, 99vw);
+  }
+  .day-sessions-modal-content .session-top {
+    grid-template-columns: auto 150px 168px 168px minmax(220px, 1fr);
+    grid-template-areas:
+      "toggle dates link shot net"
+      "mistakes mistakes good good actions";
+    align-items: start;
+  }
+  .day-sessions-modal-content .session-top > :nth-child(1) { grid-area: toggle; }
+  .day-sessions-modal-content .session-top > :nth-child(2) { grid-area: dates; }
+  .day-sessions-modal-content .session-top > :nth-child(3) { grid-area: link; }
+  .day-sessions-modal-content .session-top > :nth-child(4) { grid-area: mistakes; }
+  .day-sessions-modal-content .session-top > :nth-child(5) { grid-area: shot; }
+  .day-sessions-modal-content .session-top > :nth-child(6) { grid-area: net; }
+  .day-sessions-modal-content .session-top > :nth-child(7) { grid-area: good; }
+  .day-sessions-modal-content .session-top > :nth-child(8) { grid-area: actions; }
+}
+
+@media (max-width: 1220px) {
+  .day-sessions-modal-content {
+    width: min(1220px, 99vw);
+  }
+  .day-sessions-modal-content .session-top {
+    grid-template-columns: auto 150px 168px 1fr;
+    grid-template-areas:
+      "toggle dates link shot"
+      "mistakes mistakes good good"
+      "net net actions actions";
+  }
+  .day-sessions-modal-content .session-top > .field-with-counter .session-input {
+    min-height: 148px;
+  }
+}
+
 .account-form {
   grid-template-columns: 2fr 1fr auto;
 }
