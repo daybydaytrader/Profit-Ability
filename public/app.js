@@ -596,6 +596,7 @@ function saveState() {
 function switchTab(name) {
   document.querySelectorAll(".nav-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.id === `tab-${name}`));
+  if (name === "analysis") renderAnalysis();
 }
 
 
@@ -1355,6 +1356,84 @@ function renderJournal() {
   renderSessionViews(["journal"]);
 }
 
+function renderAnalysis() {
+  const scorecards = document.getElementById("analysisScorecards");
+  const setupList = document.getElementById("analysisSetupList");
+  const symbolList = document.getElementById("analysisSymbolList");
+  const dayList = document.getElementById("analysisDayList");
+  if (!scorecards || !setupList || !symbolList || !dayList) return;
+
+  const sessions = [...state.sessions].sort(compareSessionDatesDesc);
+  const trades = sessions.flatMap((session) => session.trades.map((trade) => ({ session, trade })));
+  const totalNet = sessions.reduce((sum, session) => sum + getSessionNet(session), 0);
+  const avgSessionNet = sessions.length ? totalNet / sessions.length : 0;
+  const winningTrades = trades.filter(({ trade }) => calcTradePnl(trade) > 0).length;
+  const avgTradeR = trades.length ? trades.reduce((sum, { trade }) => sum + calcR(trade), 0) / trades.length : 0;
+  const winRate = trades.length ? (winningTrades / trades.length) * 100 : 0;
+
+  scorecards.innerHTML = [
+    ["Total Net P/L", `$${totalNet.toFixed(2)}`, totalNet >= 0],
+    ["Avg Session", `$${avgSessionNet.toFixed(2)}`, avgSessionNet >= 0],
+    ["Trades Reviewed", `${trades.length}`, true],
+    ["Win Rate", `${winRate.toFixed(1)}%`, winRate >= 50],
+    ["Avg Trade R", `${avgTradeR.toFixed(2)}R`, avgTradeR >= 0],
+  ]
+    .map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`)
+    .join("");
+
+  const setupStats = new Map();
+  trades.forEach(({ trade }) => {
+    const setup = String(trade.setup || "").trim();
+    if (!setup) return;
+    const current = setupStats.get(setup) || { totalR: 0, trades: 0, net: 0 };
+    current.totalR += calcR(trade);
+    current.trades += 1;
+    current.net += calcTradePnl(trade);
+    setupStats.set(setup, current);
+  });
+  const topSetups = [...setupStats.entries()]
+    .map(([name, stats]) => ({
+      name,
+      avgR: stats.trades ? stats.totalR / stats.trades : 0,
+      trades: stats.trades,
+      net: stats.net,
+    }))
+    .sort((a, b) => b.avgR - a.avgR || b.net - a.net || b.trades - a.trades || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  setupList.innerHTML = topSetups.length
+    ? topSetups.map((setup) => `<li><span class="pill">${setup.avgR.toFixed(2)}R</span> ${escapeHtml(setup.name)} <span class="muted">· ${setup.trades} trade${setup.trades === 1 ? "" : "s"} · $${setup.net.toFixed(2)}</span></li>`).join("")
+    : "<li>No setup data yet.</li>";
+
+  const symbolStats = new Map();
+  trades.forEach(({ trade }) => {
+    const symbol = String(trade.symbol || "").trim().toUpperCase();
+    if (!symbol) return;
+    const current = symbolStats.get(symbol) || { net: 0, trades: 0 };
+    current.net += calcTradePnl(trade);
+    current.trades += 1;
+    symbolStats.set(symbol, current);
+  });
+  const topSymbols = [...symbolStats.entries()]
+    .map(([symbol, stats]) => ({ symbol, ...stats }))
+    .sort((a, b) => b.net - a.net || b.trades - a.trades || a.symbol.localeCompare(b.symbol))
+    .slice(0, 5);
+  symbolList.innerHTML = topSymbols.length
+    ? topSymbols.map((symbol) => `<li><span class="pill">${escapeHtml(symbol.symbol)}</span> $${symbol.net.toFixed(2)} <span class="muted">· ${symbol.trades} trade${symbol.trades === 1 ? "" : "s"}</span></li>`).join("")
+    : "<li>No symbol data yet.</li>";
+
+  const dayStats = sessions
+    .map((session) => ({
+      date: session.date || "—",
+      net: getSessionNet(session),
+      trades: session.trades.length,
+    }))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .slice(0, 10);
+  dayList.innerHTML = dayStats.length
+    ? dayStats.map((day) => `<li><strong>${escapeHtml(day.date)}</strong> <span class="${day.net >= 0 ? "good" : "bad"}">$${day.net.toFixed(2)}</span> <span class="muted">· ${day.trades} trade${day.trades === 1 ? "" : "s"}</span></li>`).join("")
+    : "<li>No sessions logged yet.</li>";
+}
+
 function renderRules() {
   document.getElementById("ruleList").innerHTML =
     state.rules
@@ -1832,6 +1911,7 @@ function rerender() {
   renderFilterSelects();
   renderOverview();
   renderJournal();
+  renderAnalysis();
   renderSymbols();
   renderDaySessionsModal();
   renderRules();
@@ -2502,6 +2582,7 @@ function updateTradeComputedUI(sessionId, tradeId) {
 function syncSessionViewsFromState(sourceContainer, { includeOverview = true, includeMistakes = true, rerenderSource = false } = {}) {
   saveState();
   if (includeOverview) renderOverview();
+  renderAnalysis();
   const sourceMode = getSessionModeFromContainer(sourceContainer);
   renderSessionViews(rerenderSource ? [sourceMode] : getCompanionSessionModes(sourceMode));
   if (includeMistakes) renderMistakes();

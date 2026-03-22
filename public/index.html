@@ -17,6 +17,7 @@
           <button data-tab="overview" class="active">Overview</button>
           <button data-tab="accounts">Accounts</button>
           <button data-tab="journal">Journal</button>
+          <button data-tab="analysis">Analysis</button>
           <button data-tab="symbols">Symbols</button>
           <button data-tab="mistakes">Mistakes</button>
           <button data-tab="playbook">Playbook</button>
@@ -141,6 +142,28 @@
               </label>
             </div>
             <div id="sessionList" class="session-list-column"></div>
+          </div>
+        </section>
+
+        <section id="tab-analysis" class="tab">
+          <div class="panel">
+            <h2>Analysis</h2>
+            <p class="muted">Review aggregate performance without changing Journal behavior.</p>
+            <div id="analysisScorecards" class="cards"></div>
+          </div>
+          <div class="grid2">
+            <div class="panel">
+              <h3>Best Setups by Avg R</h3>
+              <ul id="analysisSetupList"></ul>
+            </div>
+            <div class="panel">
+              <h3>Top Symbols by Net PnL</h3>
+              <ul id="analysisSymbolList"></ul>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Daily Performance</h3>
+            <ul id="analysisDayList"></ul>
           </div>
         </section>
 
