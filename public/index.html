@@ -196,19 +196,41 @@
             </div>
             <div id="analysisScorecards" class="analysis-kpi-strip"></div>
           </div>
-          <div class="grid2">
+          <div class="grid3 analysis-insights-grid">
             <div class="panel">
-              <h3>Best Setups by Avg R</h3>
-              <ul id="analysisSetupList"></ul>
+              <h3>Best Setups</h3>
+              <div id="analysisBestSetupCard" class="analysis-insight-card"></div>
             </div>
+            <div class="panel">
+              <h3>Worst Setups</h3>
+              <div id="analysisWorstSetupCard" class="analysis-insight-card"></div>
+            </div>
+            <div class="panel">
+              <h3>Rule Impact</h3>
+              <div id="analysisRuleImpactCard" class="analysis-insight-card"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="analysis-table-header">
+              <div>
+                <h3>Setup Breakdown</h3>
+                <p class="muted small">Grouped by setup. Click a row to inspect the underlying sessions and trades.</p>
+              </div>
+              <label>Minimum sample size
+                <input id="analysisMinSampleSize" type="number" min="1" step="1" value="3" />
+              </label>
+            </div>
+            <div id="analysisGroupedTable" class="table-wrap analysis-table-wrap"></div>
+          </div>
+          <div class="grid2">
             <div class="panel">
               <h3>Top Symbols by Net PnL</h3>
               <ul id="analysisSymbolList"></ul>
             </div>
-          </div>
-          <div class="panel">
-            <h3>Daily Performance</h3>
-            <ul id="analysisDayList"></ul>
+            <div class="panel">
+              <h3>Daily Performance</h3>
+              <ul id="analysisDayList"></ul>
+            </div>
           </div>
         </section>
 
@@ -292,6 +314,30 @@
           <button id="daySessionsModalAddBtn" type="button">+ Add Session</button>
         </div>
         <div id="daySessionsModalList" class="session-list-column"></div>
+      </div>
+    </div>
+
+    <div id="analysisDrilldownModal" class="image-modal" hidden>
+      <div class="image-modal-backdrop playbook-backdrop" data-close-analysis-drilldown-modal></div>
+      <div class="image-modal-content playbook-detail-content analysis-drilldown-content">
+        <button class="image-modal-close" type="button" data-close-analysis-drilldown-modal aria-label="Close setup drilldown">✕</button>
+        <div class="analysis-drilldown-header">
+          <div>
+            <p class="muted small">Setup drilldown</p>
+            <h3 id="analysisDrilldownTitle">Setup</h3>
+          </div>
+          <div id="analysisDrilldownMeta" class="analysis-drilldown-meta"></div>
+        </div>
+        <div class="grid2 analysis-drilldown-grid">
+          <div>
+            <h4>Sessions</h4>
+            <div id="analysisDrilldownSessions" class="analysis-drilldown-list"></div>
+          </div>
+          <div>
+            <h4>Trades</h4>
+            <div id="analysisDrilldownTrades" class="table-wrap analysis-table-wrap"></div>
+          </div>
+        </div>
       </div>
     </div>
 
