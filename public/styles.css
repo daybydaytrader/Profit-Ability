@@ -188,8 +188,7 @@ button.danger {
 
 .calendar-day-header {
   display: flex;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -197,11 +196,6 @@ button.danger {
   font-size: 0.95rem;
   font-weight: 700;
   color: var(--text);
-}
-
-.calendar-day-count {
-  font-size: 0.72rem;
-  color: var(--muted);
 }
 
 .calendar-day-pnl {

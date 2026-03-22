@@ -876,9 +876,8 @@ function renderOverviewCalendar() {
     >
       <span class="calendar-day-header">
         <span class="calendar-day-number">${slot.day}</span>
-        ${summary ? `<span class="calendar-day-count">${summary.sessions} ${summary.sessions === 1 ? "session" : "sessions"}</span>` : ""}
       </span>
-      ${summary ? `<span class="calendar-day-pnl ${summary.net >= 0 ? "good" : "bad"}">${formatCompactCurrency(summary.net)}</span><span class="calendar-day-meta">${summary.sessions === 1 ? "1 trading session" : `${summary.sessions} trading sessions`}</span>` : '<span class="calendar-day-meta">No sessions</span>'}
+      ${summary ? `<span class="calendar-day-pnl ${summary.net >= 0 ? "good" : "bad"}">${formatCompactCurrency(summary.net)}</span>` : '<span class="calendar-day-meta">No sessions</span>'}
     </button>`;
   }).join("");
 }
