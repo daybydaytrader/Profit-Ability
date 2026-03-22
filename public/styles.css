@@ -880,10 +880,11 @@ button.success:hover {
 }
 
 .day-sessions-modal-content {
-  width: min(1440px, 96vw);
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-  padding: 20px;
+  width: min(1660px, 98vw);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 24px 24px;
   padding-top: 52px;
   display: grid;
   gap: 16px;
@@ -895,13 +896,70 @@ button.success:hover {
 .day-sessions-modal-content #daySessionsModalList {
   margin-top: 0;
 }
+.day-sessions-modal-content .session-top {
+  grid-template-columns: auto minmax(140px, 156px) minmax(176px, 196px) minmax(240px, 1fr) minmax(176px, 196px) minmax(240px, 1fr);
+  grid-template-areas:
+    "toggle dates link mistakes shot good"
+    "toggle dates link mistakes net good"
+    ". . . mistakes actions actions";
+  align-items: stretch;
+}
+.day-sessions-modal-content .session-top > :nth-child(1) { grid-area: toggle; }
+.day-sessions-modal-content .session-top > :nth-child(2) { grid-area: dates; }
+.day-sessions-modal-content .session-top > :nth-child(3) { grid-area: link; }
+.day-sessions-modal-content .session-top > :nth-child(4) { grid-area: mistakes; }
+.day-sessions-modal-content .session-top > :nth-child(5) { grid-area: shot; }
+.day-sessions-modal-content .session-top > :nth-child(6) { grid-area: net; }
+.day-sessions-modal-content .session-top > :nth-child(7) { grid-area: good; }
+.day-sessions-modal-content .session-top > :nth-child(8) { grid-area: actions; }
+.day-sessions-modal-content .session-date-fields {
+  height: auto;
+  min-height: 188px;
+  align-content: stretch;
+}
+.day-sessions-modal-content .session-link-wrap,
+.day-sessions-modal-content .session-shot-wrap {
+  width: 100%;
+  justify-self: center;
+}
+.day-sessions-modal-content .session-shot.session-link-card,
+.day-sessions-modal-content .session-shot-empty.session-link-card,
+.day-sessions-modal-content .session-shot,
+.day-sessions-modal-content .session-shot-empty {
+  width: 176px;
+  height: 176px;
+}
+.day-sessions-modal-content .net-result-wrap {
+  min-width: 176px;
+}
+.day-sessions-modal-content .session-top > .field-with-counter {
+  height: 100%;
+}
+.day-sessions-modal-content .session-top > .field-with-counter .session-input {
+  min-height: 188px;
+  height: 100%;
+}
+.day-sessions-modal-content .session-top-actions {
+  align-self: end;
+  justify-content: flex-end;
+}
 
-@media (max-width: 1320px) {
+@media (max-width: 1360px) {
   .day-sessions-modal-content {
-    width: min(1180px, 96vw);
+    width: min(1360px, 98vw);
   }
   .day-sessions-modal-content .session-top {
-    grid-template-columns: auto minmax(132px, 156px) minmax(132px, 156px) minmax(220px, 1fr) auto auto minmax(220px, 1fr) auto;
+    grid-template-columns: auto minmax(140px, 164px) minmax(164px, 184px) minmax(164px, 184px);
+    grid-template-areas:
+      "toggle dates link shot"
+      "mistakes mistakes good good"
+      "net net actions actions";
+  }
+  .day-sessions-modal-content .session-date-fields {
+    min-height: 176px;
+  }
+  .day-sessions-modal-content .session-top > .field-with-counter .session-input {
+    min-height: 148px;
   }
 }
 
