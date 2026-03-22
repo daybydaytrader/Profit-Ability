@@ -888,9 +888,16 @@ button.success:hover {
   display: grid;
   gap: 16px;
 }
+.day-sessions-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .day-sessions-modal-content h3 {
   margin: 0;
   text-align: center;
+  flex: 1;
 }
 .day-sessions-modal-content #daySessionsModalList {
   margin-top: 0;
@@ -987,6 +994,10 @@ button.success:hover {
   .day-sessions-modal-content {
     width: min(1480px, 99vw);
   }
+  .day-sessions-modal-header {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
   .day-sessions-modal-content .session-top {
     grid-template-columns: auto 150px 168px 168px minmax(220px, 1fr);
     grid-template-areas:
@@ -1007,6 +1018,9 @@ button.success:hover {
 @media (max-width: 1220px) {
   .day-sessions-modal-content {
     width: min(1220px, 99vw);
+  }
+  .day-sessions-modal-header {
+    flex-direction: column;
   }
   .day-sessions-modal-content .session-top {
     grid-template-columns: auto 150px 168px 1fr;

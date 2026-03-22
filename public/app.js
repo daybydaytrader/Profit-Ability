@@ -1230,15 +1230,18 @@ function renderDaySessionsModal() {
   const modal = document.getElementById("daySessionsModal");
   const title = document.getElementById("daySessionsModalTitle");
   const list = document.getElementById("daySessionsModalList");
+  const addButton = document.getElementById("daySessionsModalAddBtn");
   const date = uiState.daySessionsModalDate;
-  if (!modal || !title || !list) return;
+  if (!modal || !title || !list || !addButton) return;
   if (!date) {
     modal.hidden = true;
+    addButton.hidden = true;
     if (!document.getElementById("imageModal")?.hidden || !document.getElementById("linkModal")?.hidden || !document.getElementById("playbookDetailModal")?.hidden || !document.getElementById("customSymbolModal")?.hidden || !document.getElementById("ruleDetailModal")?.hidden || !document.getElementById("accountDetailModal")?.hidden || !document.getElementById("accountGroupPickerModal")?.hidden || !document.getElementById("accountEntityModal")?.hidden || !document.getElementById("groupBuilderModal")?.hidden || !document.getElementById("deleteEntityModal")?.hidden) return;
     document.body.style.overflow = "";
     return;
   }
   title.textContent = `Sessions for ${date}`;
+  addButton.hidden = false;
   list.innerHTML = renderSessionCards(getDaySessionsModalSessions(date), "No sessions match this day.");
   modal.hidden = false;
   document.body.style.overflow = "hidden";
@@ -1772,20 +1775,22 @@ function rerender() {
   renderUndoState();
 }
 
-function addSession() {
-  state.sessions.unshift(
-    normalizeSession({
-      id: `s${Date.now()}`,
-      date: new Date().toISOString().slice(0, 10),
-      day: "",
-      mistakes: "",
-      correctDecisions: "",
-      rules: {},
-      accountId: state.accounts[0]?.id || "",
-      collapsed: true,
-      trades: [],
-    })
-  );
+function createSessionWithDefaults(date = todayIso()) {
+  return normalizeSession({
+    id: `s${Date.now()}`,
+    date,
+    day: "",
+    mistakes: "",
+    correctDecisions: "",
+    rules: {},
+    accountId: state.accounts[0]?.id || "",
+    collapsed: true,
+    trades: [],
+  });
+}
+
+function addSession(date = todayIso()) {
+  state.sessions.unshift(createSessionWithDefaults(date));
   state.sessions.sort(compareSessionDatesDesc);
   rerender();
 }
@@ -2439,6 +2444,10 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
 });
 
 document.getElementById("addSessionBtn").addEventListener("click", addSession);
+document.getElementById("daySessionsModalAddBtn")?.addEventListener("click", () => {
+  if (!uiState.daySessionsModalDate) return;
+  addSession(uiState.daySessionsModalDate);
+});
 document.getElementById("resetJournalFiltersBtn")?.addEventListener("click", resetJournalFilters);
 document.getElementById("addRuleBtn").addEventListener("click", () => {
   uiState.activeRuleId = null;
