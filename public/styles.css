@@ -454,6 +454,17 @@ button.danger {
 }
 
 .session-list-column { display: grid; gap: 12px; margin-top: 10px; }
+.payout-table-wrap textarea {
+  min-width: 220px;
+  resize: vertical;
+}
+.payout-checkbox-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
 
 .journal-controls {
   display: flex;
