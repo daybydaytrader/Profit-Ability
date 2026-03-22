@@ -40,6 +40,34 @@
             <div id="scorecards" class="cards"></div>
           </div>
           <div class="panel">
+            <div class="calendar-panel-header">
+              <div>
+                <h3>Trading Calendar</h3>
+                <p class="muted">Track your daily PnL at a glance.</p>
+              </div>
+              <div class="calendar-toolbar">
+                <button id="calendarPrevBtn" type="button" class="calendar-nav-btn" aria-label="Previous month">←</button>
+                <label class="calendar-select-wrap">Month
+                  <select id="calendarMonthSelect"></select>
+                </label>
+                <label class="calendar-select-wrap">Year
+                  <select id="calendarYearSelect"></select>
+                </label>
+                <button id="calendarNextBtn" type="button" class="calendar-nav-btn" aria-label="Next month">→</button>
+              </div>
+            </div>
+            <div class="calendar-weekdays" aria-hidden="true">
+              <span>Sun</span>
+              <span>Mon</span>
+              <span>Tue</span>
+              <span>Wed</span>
+              <span>Thu</span>
+              <span>Fri</span>
+              <span>Sat</span>
+            </div>
+            <div id="overviewCalendarGrid" class="calendar-grid" role="grid" aria-label="Trading calendar"></div>
+          </div>
+          <div class="panel">
             <h3>Equity Curve</h3>
             <div class="chart-filters">
               <label>Account
