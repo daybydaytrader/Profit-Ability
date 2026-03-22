@@ -69,6 +69,20 @@ function getAllSymbolOptions() {
   return [...new Set([...SYMBOL_OPTIONS, ...custom])];
 }
 
+function getCustomSymbolUsage(ticker) {
+  const normalized = String(ticker || "").trim().toUpperCase();
+  if (!normalized) return { sessions: 0, trades: 0 };
+  let sessions = 0;
+  let trades = 0;
+  state.sessions.forEach((session) => {
+    const matchingTrades = (session.trades || []).filter((trade) => String(trade.symbol || "").trim().toUpperCase() === normalized);
+    if (!matchingTrades.length) return;
+    sessions += 1;
+    trades += matchingTrades.length;
+  });
+  return { sessions, trades };
+}
+
 function getBasePriceStep(symbol) {
   if (["NQ", "MNQ", "ES", "MES"].includes(symbol)) return 0.25;
   if (["GC", "MGC"].includes(symbol)) return 0.1;
@@ -1249,6 +1263,7 @@ function renderSymbols() {
   const rows = getAllSymbolOptions().map((ticker) => {
     const customSymbol = state.customSymbols.find((item) => item.ticker === ticker);
     const config = getSymbolConfig(ticker);
+    const usage = getCustomSymbolUsage(ticker);
     const tickValue = customSymbol?.tickValue ?? config.tickSize * config.pointValue;
     const pointValue = Number.isFinite(config.pointValue) ? config.pointValue : 0;
     return `
@@ -1261,9 +1276,12 @@ function renderSymbols() {
           <span><span class="muted">Tick</span> ${formatWithThousands(config.tickSize, 4)}</span>
           <span><span class="muted">$/tick</span> $${formatWithThousands(tickValue, 2)}</span>
           ${pointValue ? `<span><span class="muted">Point value</span> $${formatWithThousands(pointValue, 2)}</span>` : ''}
+          ${usage.trades ? `<span><span class="muted">Journal usage</span> ${usage.trades} trade${usage.trades === 1 ? "" : "s"} in ${usage.sessions} session${usage.sessions === 1 ? "" : "s"}</span>` : '<span><span class="muted">Journal usage</span> Not used yet</span>'}
         </div>
         <div class="symbol-row-actions">
-          ${customSymbol ? `<button type="button" data-del-symbol="${ticker}">Remove</button>` : `<span class="muted small">Built-in</span>`}
+          ${customSymbol
+            ? `<button type="button" data-del-symbol="${ticker}" ${usage.trades ? "disabled" : ""}>${usage.trades ? "In use" : "Remove"}</button>`
+            : `<span class="muted small">Built-in</span>`}
         </div>
       </article>`;
   });
@@ -2567,6 +2585,11 @@ document.getElementById("groupsList").addEventListener("click", (e) => {
 document.getElementById("symbolCatalog").addEventListener("click", (e) => {
   const delSymbol = e.target.closest("[data-del-symbol]")?.dataset.delSymbol;
   if (!delSymbol) return;
+  const usage = getCustomSymbolUsage(delSymbol);
+  if (usage.trades) {
+    setCustomSymbolStatus(`Can't remove ${delSymbol} while Journal still uses it in ${usage.trades} trade${usage.trades === 1 ? "" : "s"}.`);
+    return;
+  }
   state.customSymbols = state.customSymbols.filter((item) => item.ticker !== delSymbol);
   setCustomSymbolStatus(`Removed ${delSymbol}.`);
   rerender();
