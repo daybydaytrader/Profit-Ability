@@ -140,7 +140,11 @@ const uiState = {
     analysisSymbols: [],
     analysisDirection: "all",
     analysisRuleMode: "all",
+    analysisMinSampleSize: 3,
+    analysisSortKey: "net",
+    analysisSortDirection: "desc",
   },
+  analysisDrilldownSetup: "",
   groupsView: "active",
   imageEditor: {
     visible: false,
@@ -745,13 +749,13 @@ function getAnalysisRuleMatch(session) {
   return true;
 }
 
-function getAnalysisFilteredTrades() {
+function getAnalysisFilteredTrades({ ignoreRuleMode = false } = {}) {
   syncAnalysisDateRangeFromPreset();
   const sessions = getFilteredSessions({
     accountId: uiState.filters.analysisAccountId,
     from: uiState.filters.analysisFrom,
     to: uiState.filters.analysisTo,
-  }).filter((session) => getAnalysisRuleMatch(session));
+  }).filter((session) => ignoreRuleMode || getAnalysisRuleMatch(session));
   const setupFilter = new Set((uiState.filters.analysisSetups || []).map((item) => String(item || "").trim()).filter(Boolean));
   const symbolFilter = new Set((uiState.filters.analysisSymbols || []).map((item) => String(item || "").trim().toUpperCase()).filter(Boolean));
 
@@ -770,6 +774,98 @@ function getAnalysisFilteredTrades() {
     .map((trade) => ({ session, trade })));
 
   return { sessions, trades };
+}
+
+function calcSignedR(trade) {
+  const baseR = calcR(trade);
+  if (!baseR) return 0;
+  const pnl = calcTradePnl(trade);
+  if (!pnl) return 0;
+  return pnl > 0 ? baseR : -baseR;
+}
+
+function formatCurrency(value) {
+  const amount = Number(value || 0);
+  return `${amount < 0 ? "-" : ""}$${Math.abs(amount).toFixed(2)}`;
+}
+
+function getAnalysisSetupRows(trades) {
+  const grouped = new Map();
+  trades.forEach(({ session, trade }) => {
+    const setup = String(trade.setup || "").trim() || "Unlabeled";
+    const current = grouped.get(setup) || {
+      setup,
+      trades: 0,
+      wins: 0,
+      signedRTotal: 0,
+      net: 0,
+      grossProfit: 0,
+      grossLoss: 0,
+      sessions: new Map(),
+      entries: [],
+    };
+    const tradeNet = calcTradeNet(trade, session);
+    current.trades += 1;
+    current.wins += tradeNet > 0 ? 1 : 0;
+    current.signedRTotal += calcSignedR(trade);
+    current.net += tradeNet;
+    if (tradeNet > 0) current.grossProfit += tradeNet;
+    if (tradeNet < 0) current.grossLoss += Math.abs(tradeNet);
+    if (!current.sessions.has(session.id)) current.sessions.set(session.id, session);
+    current.entries.push({ session, trade, net: tradeNet, signedR: calcSignedR(trade) });
+    grouped.set(setup, current);
+  });
+  return [...grouped.values()].map((item) => {
+    const avgR = item.trades ? item.signedRTotal / item.trades : 0;
+    const expectancy = item.trades ? item.net / item.trades : 0;
+    const profitFactor = !item.grossLoss ? (item.grossProfit > 0 ? Number.POSITIVE_INFINITY : 0) : item.grossProfit / item.grossLoss;
+    return {
+      setup: item.setup,
+      trades: item.trades,
+      sessions: item.sessions.size,
+      winRate: item.trades ? (item.wins / item.trades) * 100 : 0,
+      avgR,
+      net: item.net,
+      expectancy,
+      profitFactor,
+      entries: item.entries,
+    };
+  });
+}
+
+function sortAnalysisSetupRows(rows) {
+  const key = uiState.filters.analysisSortKey || "net";
+  const direction = uiState.filters.analysisSortDirection === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const aValue = a[key];
+    const bValue = b[key];
+    let comparison = 0;
+    if (key === "setup") comparison = a.setup.localeCompare(b.setup);
+    else if (Number.isFinite(aValue) && Number.isFinite(bValue)) comparison = aValue - bValue;
+    else if (aValue === bValue) comparison = 0;
+    else comparison = Number.isFinite(aValue) ? -1 : 1;
+    if (comparison === 0) comparison = b.net - a.net || b.trades - a.trades || a.setup.localeCompare(b.setup);
+    return comparison * direction;
+  });
+}
+
+function getRuleImpactStats() {
+  const checkboxRules = state.rules.filter((rule) => rule.type === "checkbox");
+  if (!checkboxRules.length) return null;
+  const comparison = getAnalysisFilteredTrades({ ignoreRuleMode: true }).trades;
+  const buckets = {
+    followed: { trades: 0, wins: 0, net: 0 },
+    notFollowed: { trades: 0, wins: 0, net: 0 },
+  };
+  comparison.forEach(({ session, trade }) => {
+    const allPassed = checkboxRules.every((rule) => Boolean(session.rules?.[rule.id]));
+    const bucket = allPassed ? buckets.followed : buckets.notFollowed;
+    const tradeNet = calcTradeNet(trade, session);
+    bucket.trades += 1;
+    bucket.wins += tradeNet > 0 ? 1 : 0;
+    bucket.net += tradeNet;
+  });
+  return buckets;
 }
 
 function calcProfitFactor(trades) {
@@ -1505,18 +1601,117 @@ function renderJournal() {
   renderSessionViews(["journal"]);
 }
 
+function renderAnalysisInsightCard(containerId, rows, emptyMessage, formatter) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = `<p class="analysis-empty-state">${emptyMessage}</p>`;
+    return;
+  }
+  container.innerHTML = `<ul>${rows.map(formatter).join("")}</ul>`;
+}
+
+function renderAnalysisGroupedTable(rows, totalRows) {
+  const container = document.getElementById("analysisGroupedTable");
+  if (!container) return;
+  const columns = [
+    ["setup", "Setup"],
+    ["trades", "Trades"],
+    ["winRate", "Win Rate"],
+    ["avgR", "Avg R"],
+    ["net", "Net PnL"],
+    ["expectancy", "Expectancy"],
+    ["profitFactor", "Profit Factor"],
+  ];
+  if (!totalRows.length) {
+    container.innerHTML = '<p class="analysis-empty-state">No setup data matches the current filters yet.</p>';
+    return;
+  }
+  if (!rows.length) {
+    container.innerHTML = `<p class="analysis-empty-state">No setups meet the ${uiState.filters.analysisMinSampleSize}-trade minimum sample size. Lower the threshold to inspect smaller samples.</p>`;
+    return;
+  }
+  container.innerHTML = `<table><thead><tr>${columns.map(([key, label]) => {
+    const active = uiState.filters.analysisSortKey === key;
+    const direction = active ? uiState.filters.analysisSortDirection : "desc";
+    const glyph = !active ? "↕" : (direction === "asc" ? "↑" : "↓");
+    return `<th><button type="button" class="analysis-sort-btn" data-analysis-sort="${key}"><span>${label}</span><span aria-hidden="true">${glyph}</span></button></th>`;
+  }).join("")}</tr></thead><tbody>${rows.map((row) => {
+    const selected = uiState.analysisDrilldownSetup === row.setup;
+    return `<tr class="analysis-table-row ${selected ? "is-selected" : ""}" tabindex="0" role="button" data-analysis-setup-row="${escapeHtml(row.setup)}">
+      <td><strong>${escapeHtml(row.setup)}</strong><div class="muted small">${row.sessions} session${row.sessions === 1 ? "" : "s"}</div></td>
+      <td>${row.trades}</td>
+      <td class="${row.winRate >= 50 ? "good" : "bad"}">${row.winRate.toFixed(1)}%</td>
+      <td class="${row.avgR >= 0 ? "good" : "bad"}">${row.avgR.toFixed(2)}R</td>
+      <td class="${row.net >= 0 ? "good" : "bad"}">${formatCurrency(row.net)}</td>
+      <td class="${row.expectancy >= 0 ? "good" : "bad"}">${formatCurrency(row.expectancy)}</td>
+      <td class="${row.profitFactor >= 1 || !Number.isFinite(row.profitFactor) ? "good" : "bad"}">${formatRatio(row.profitFactor)}</td>
+    </tr>`;
+  }).join("")}</tbody></table>`;
+}
+
+function renderAnalysisDrilldownModal(row) {
+  const modal = document.getElementById("analysisDrilldownModal");
+  const title = document.getElementById("analysisDrilldownTitle");
+  const meta = document.getElementById("analysisDrilldownMeta");
+  const sessionsEl = document.getElementById("analysisDrilldownSessions");
+  const tradesEl = document.getElementById("analysisDrilldownTrades");
+  if (!modal || !title || !meta || !sessionsEl || !tradesEl) return;
+  if (!row) {
+    modal.hidden = true;
+    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("daySessionsModal").hidden) document.body.style.overflow = "";
+    return;
+  }
+  title.textContent = row.setup;
+  meta.innerHTML = [
+    `<span class="pill">${row.trades} trade${row.trades === 1 ? "" : "s"}</span>`,
+    `<span class="pill">${row.sessions} session${row.sessions === 1 ? "" : "s"}</span>`,
+    `<span class="pill ${row.avgR >= 0 ? "good" : "bad"}">${row.avgR.toFixed(2)}R avg</span>`,
+    `<span class="pill ${row.net >= 0 ? "good" : "bad"}">${formatCurrency(row.net)}</span>`,
+  ].join("");
+  const sessions = [...new Map(row.entries.map(({ session }) => [session.id, session])).values()]
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  sessionsEl.innerHTML = sessions.length
+    ? sessions.map((session) => {
+      const sessionTrades = row.entries.filter((entry) => entry.session.id === session.id);
+      const net = sessionTrades.reduce((sum, entry) => sum + entry.net, 0);
+      return `<article class="analysis-drilldown-session"><p><strong>${escapeHtml(session.date || "—")}</strong> · ${escapeHtml(accountTargetLabel(session.accountId) || "—")}</p><p class="muted small">${sessionTrades.length} trade${sessionTrades.length === 1 ? "" : "s"} · ${formatCurrency(net)} · Rule adherence ${getSessionRuleAdherence(session) === null ? "N/A" : `${getSessionRuleAdherence(session).toFixed(0)}%`}</p></article>`;
+    }).join("")
+    : '<p class="analysis-empty-state">No sessions available.</p>';
+  tradesEl.innerHTML = row.entries.length
+    ? `<table><thead><tr><th>Date</th><th>Account</th><th>Symbol</th><th>Direction</th><th>R</th><th>PnL</th></tr></thead><tbody>${row.entries
+      .slice()
+      .sort((a, b) => String(b.session.date || "").localeCompare(String(a.session.date || "")) || String(a.trade.entryTime || "").localeCompare(String(b.trade.entryTime || "")))
+      .map((entry) => `<tr><td>${escapeHtml(entry.session.date || "—")}</td><td>${escapeHtml(accountTargetLabel(getTradeAccountTargetId(entry.trade, entry.session)) || "—")}</td><td>${escapeHtml(String(entry.trade.symbol || "—").toUpperCase())}</td><td>${escapeHtml(entry.trade.type === "short" ? "Short" : "Long")}</td><td class="${entry.signedR >= 0 ? "good" : "bad"}">${entry.signedR.toFixed(2)}R</td><td class="${entry.net >= 0 ? "good" : "bad"}">${formatCurrency(entry.net)}</td></tr>`).join("")}</tbody></table>`
+    : '<p class="analysis-empty-state">No trades available.</p>';
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
+}
+
+function openAnalysisDrilldown(setup) {
+  uiState.analysisDrilldownSetup = setup || "";
+  renderAnalysis();
+}
+
+function closeAnalysisDrilldown() {
+  uiState.analysisDrilldownSetup = "";
+  renderAnalysisDrilldownModal(null);
+  renderAnalysis();
+}
+
 function renderAnalysis() {
   const scorecards = document.getElementById("analysisScorecards");
-  const setupList = document.getElementById("analysisSetupList");
   const symbolList = document.getElementById("analysisSymbolList");
   const dayList = document.getElementById("analysisDayList");
-  if (!scorecards || !setupList || !symbolList || !dayList) return;
+  const thresholdInput = document.getElementById("analysisMinSampleSize");
+  if (!scorecards || !symbolList || !dayList || !thresholdInput) return;
 
   renderFilterSelects();
+  if (document.activeElement !== thresholdInput) thresholdInput.value = String(uiState.filters.analysisMinSampleSize || 1);
   const { sessions, trades } = getAnalysisFilteredTrades();
   const totalNet = trades.reduce((sum, { trade, session }) => sum + calcTradeNet(trade, session), 0);
   const winningTrades = trades.filter(({ trade, session }) => calcTradeNet(trade, session) > 0).length;
-  const avgTradeR = trades.length ? trades.reduce((sum, { trade }) => sum + calcR(trade), 0) / trades.length : 0;
+  const avgTradeR = trades.length ? trades.reduce((sum, { trade }) => sum + calcSignedR(trade), 0) / trades.length : 0;
   const winRate = trades.length ? (winningTrades / trades.length) * 100 : 0;
   const profitFactor = calcProfitFactor(trades);
   const expectancy = trades.length ? totalNet / trades.length : 0;
@@ -1525,35 +1720,56 @@ function renderAnalysis() {
     ["Trades", `${trades.length}`, true],
     ["Win Rate", `${winRate.toFixed(1)}%`, winRate >= 50],
     ["Avg R", `${avgTradeR.toFixed(2)}R`, avgTradeR >= 0],
-    ["Net PnL", `$${totalNet.toFixed(2)}`, totalNet >= 0],
+    ["Net PnL", formatCurrency(totalNet), totalNet >= 0],
     ["Profit Factor", formatRatio(profitFactor), profitFactor >= 1 || !Number.isFinite(profitFactor)],
-    ["Expectancy", `$${expectancy.toFixed(2)}`, expectancy >= 0],
+    ["Expectancy", formatCurrency(expectancy), expectancy >= 0],
   ]
     .map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`)
     .join("");
 
-  const setupStats = new Map();
-  trades.forEach(({ trade, session }) => {
-    const setup = String(trade.setup || "").trim();
-    if (!setup) return;
-    const current = setupStats.get(setup) || { totalR: 0, trades: 0, net: 0 };
-    current.totalR += calcR(trade);
-    current.trades += 1;
-    current.net += calcTradeNet(trade, session);
-    setupStats.set(setup, current);
-  });
-  const topSetups = [...setupStats.entries()]
-    .map(([name, stats]) => ({
-      name,
-      avgR: stats.trades ? stats.totalR / stats.trades : 0,
-      trades: stats.trades,
-      net: stats.net,
-    }))
-    .sort((a, b) => b.avgR - a.avgR || b.net - a.net || b.trades - a.trades || a.name.localeCompare(b.name))
-    .slice(0, 5);
-  setupList.innerHTML = topSetups.length
-    ? topSetups.map((setup) => `<li><span class="pill">${setup.avgR.toFixed(2)}R</span> ${escapeHtml(setup.name)} <span class="muted">· ${setup.trades} trade${setup.trades === 1 ? "" : "s"} · $${setup.net.toFixed(2)}</span></li>`).join("")
-    : "<li>No setup data yet.</li>";
+  const setupRows = getAnalysisSetupRows(trades);
+  const minSample = Math.max(1, Number(uiState.filters.analysisMinSampleSize) || 1);
+  const eligibleRows = setupRows.filter((row) => row.trades >= minSample);
+  const sortedRows = sortAnalysisSetupRows(eligibleRows);
+  if (uiState.analysisDrilldownSetup && !setupRows.some((row) => row.setup === uiState.analysisDrilldownSetup)) uiState.analysisDrilldownSetup = "";
+
+  renderAnalysisInsightCard(
+    "analysisBestSetupCard",
+    [...eligibleRows].sort((a, b) => b.avgR - a.avgR || b.net - a.net || b.trades - a.trades).slice(0, 3),
+    "No setups meet the current sample-size threshold.",
+    (row) => `<li><strong>${escapeHtml(row.setup)}</strong> <span class="pill ${row.avgR >= 0 ? "good" : "bad"}">${row.avgR.toFixed(2)}R</span><span class="muted"> · ${row.trades} trades · ${formatCurrency(row.net)}</span></li>`,
+  );
+  renderAnalysisInsightCard(
+    "analysisWorstSetupCard",
+    [...eligibleRows].sort((a, b) => a.avgR - b.avgR || a.net - b.net || b.trades - a.trades).slice(0, 3),
+    "No setups meet the current sample-size threshold.",
+    (row) => `<li><strong>${escapeHtml(row.setup)}</strong> <span class="pill ${row.avgR >= 0 ? "good" : "bad"}">${row.avgR.toFixed(2)}R</span><span class="muted"> · ${row.trades} trades · ${formatCurrency(row.net)}</span></li>`,
+  );
+
+  const ruleImpact = getRuleImpactStats();
+  const ruleImpactCard = document.getElementById("analysisRuleImpactCard");
+  if (ruleImpactCard) {
+    if (!ruleImpact) {
+      ruleImpactCard.innerHTML = '<p class="analysis-empty-state">Add at least one checkbox rule to compare followed vs not followed sessions.</p>';
+    } else {
+      const followedExpectancy = ruleImpact.followed.trades ? ruleImpact.followed.net / ruleImpact.followed.trades : 0;
+      const failedExpectancy = ruleImpact.notFollowed.trades ? ruleImpact.notFollowed.net / ruleImpact.notFollowed.trades : 0;
+      const delta = followedExpectancy - failedExpectancy;
+      const followedWinRate = ruleImpact.followed.trades ? (ruleImpact.followed.wins / ruleImpact.followed.trades) * 100 : 0;
+      const failedWinRate = ruleImpact.notFollowed.trades ? (ruleImpact.notFollowed.wins / ruleImpact.notFollowed.trades) * 100 : 0;
+      ruleImpactCard.innerHTML = `
+        <p><strong>Followed</strong> <span class="pill ${followedExpectancy >= 0 ? "good" : "bad"}">${formatCurrency(followedExpectancy)} / trade</span></p>
+        <p class="muted small">${ruleImpact.followed.trades} trades · ${followedWinRate.toFixed(1)}% win rate · ${formatCurrency(ruleImpact.followed.net)} net</p>
+        <p><strong>Not followed</strong> <span class="pill ${failedExpectancy >= 0 ? "good" : "bad"}">${formatCurrency(failedExpectancy)} / trade</span></p>
+        <p class="muted small">${ruleImpact.notFollowed.trades} trades · ${failedWinRate.toFixed(1)}% win rate · ${formatCurrency(ruleImpact.notFollowed.net)} net</p>
+        <p><strong>Delta</strong> <span class="pill ${delta >= 0 ? "good" : "bad"}">${delta >= 0 ? "+" : ""}${formatCurrency(delta).replace(/^\+?/, "")}</span></p>
+      `;
+    }
+  }
+
+  renderAnalysisGroupedTable(sortedRows, setupRows);
+  const selectedRow = setupRows.find((row) => row.setup === uiState.analysisDrilldownSetup) || null;
+  renderAnalysisDrilldownModal(selectedRow);
 
   const symbolStats = new Map();
   trades.forEach(({ trade, session }) => {
@@ -1569,7 +1785,7 @@ function renderAnalysis() {
     .sort((a, b) => b.net - a.net || b.trades - a.trades || a.symbol.localeCompare(b.symbol))
     .slice(0, 5);
   symbolList.innerHTML = topSymbols.length
-    ? topSymbols.map((symbol) => `<li><span class="pill">${escapeHtml(symbol.symbol)}</span> $${symbol.net.toFixed(2)} <span class="muted">· ${symbol.trades} trade${symbol.trades === 1 ? "" : "s"}</span></li>`).join("")
+    ? topSymbols.map((symbol) => `<li><span class="pill">${escapeHtml(symbol.symbol)}</span> ${formatCurrency(symbol.net)} <span class="muted">· ${symbol.trades} trade${symbol.trades === 1 ? "" : "s"}</span></li>`).join("")
     : "<li>No symbol data yet.</li>";
 
   const dayTotals = new Map();
@@ -1584,7 +1800,7 @@ function renderAnalysis() {
     .sort((a, b) => String(b.date).localeCompare(String(a.date)))
     .slice(0, 10);
   dayList.innerHTML = dayStats.length
-    ? dayStats.map((day) => `<li><strong>${escapeHtml(day.date)}</strong> <span class="${day.net >= 0 ? "good" : "bad"}">$${day.net.toFixed(2)}</span> <span class="muted">· ${day.trades} trade${day.trades === 1 ? "" : "s"}</span></li>`).join("")
+    ? dayStats.map((day) => `<li><strong>${escapeHtml(day.date)}</strong> <span class="${day.net >= 0 ? "good" : "bad"}">${formatCurrency(day.net)}</span> <span class="muted">· ${day.trades} trade${day.trades === 1 ? "" : "s"}</span></li>`).join("")
     : `<li>No results match the current filters.${sessions.length ? "" : " Add sessions to see analysis."}</li>`;
 }
 
@@ -2908,11 +3124,12 @@ wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
   ["analysisAccountFilter", "analysisAccountId"],
   ["analysisDirectionFilter", "analysisDirection"],
   ["analysisRuleFilterMode", "analysisRuleMode"],
+  ["analysisMinSampleSize", "analysisMinSampleSize"],
 ].forEach(([id, key]) => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener("input", (e) => {
-    uiState.filters[key] = e.target.value;
+    uiState.filters[key] = key === "analysisMinSampleSize" ? Math.max(1, Number(e.target.value || 1)) : e.target.value;
     if (key === "analysisPreset" && e.target.value !== "custom") syncAnalysisDateRangeFromPreset();
     renderAnalysis();
   });
@@ -2927,6 +3144,10 @@ document.getElementById("analysisResetFiltersBtn")?.addEventListener("click", ()
   uiState.filters.analysisSymbols = [];
   uiState.filters.analysisDirection = "all";
   uiState.filters.analysisRuleMode = "all";
+  uiState.filters.analysisMinSampleSize = 3;
+  uiState.filters.analysisSortKey = "net";
+  uiState.filters.analysisSortDirection = "desc";
+  uiState.analysisDrilldownSetup = "";
   renderAnalysis();
 });
 
@@ -2939,6 +3160,35 @@ document.addEventListener("change", (e) => {
   else values.delete(checkbox.value);
   uiState.filters[key] = [...values];
   renderAnalysis();
+});
+
+document.getElementById("analysisGroupedTable")?.addEventListener("click", (e) => {
+  const sortButton = e.target.closest("[data-analysis-sort]");
+  if (sortButton) {
+    const key = sortButton.dataset.analysisSort;
+    if (uiState.filters.analysisSortKey === key) uiState.filters.analysisSortDirection = uiState.filters.analysisSortDirection === "asc" ? "desc" : "asc";
+    else {
+      uiState.filters.analysisSortKey = key;
+      uiState.filters.analysisSortDirection = key === "setup" ? "asc" : "desc";
+    }
+    renderAnalysis();
+    return;
+  }
+  const row = e.target.closest("[data-analysis-setup-row]");
+  if (!row) return;
+  openAnalysisDrilldown(row.dataset.analysisSetupRow);
+});
+
+document.getElementById("analysisGroupedTable")?.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const row = e.target.closest("[data-analysis-setup-row]");
+  if (!row) return;
+  e.preventDefault();
+  openAnalysisDrilldown(row.dataset.analysisSetupRow);
+});
+
+document.getElementById("analysisDrilldownModal")?.addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-analysis-drilldown-modal]")) closeAnalysisDrilldown();
 });
 
 document.getElementById("calendarPrevBtn")?.addEventListener("click", () => shiftCalendarMonth(-1));
@@ -3343,6 +3593,7 @@ window.addEventListener("keydown", (e) => {
   closeAccountEntityModal();
   closeRuleModal();
   closeDeleteSessionModal();
+  closeAnalysisDrilldown();
   const playbookModal = document.getElementById("playbookDetailModal");
   if (playbookModal && !playbookModal.hidden) playbookModal.hidden = true;
 });
