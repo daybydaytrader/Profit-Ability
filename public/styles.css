@@ -879,6 +879,32 @@ button.success:hover {
   backdrop-filter: blur(8px);
 }
 
+.day-sessions-modal-content {
+  width: min(1440px, 96vw);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 20px;
+  padding-top: 52px;
+  display: grid;
+  gap: 16px;
+}
+.day-sessions-modal-content h3 {
+  margin: 0;
+  text-align: center;
+}
+.day-sessions-modal-content #daySessionsModalList {
+  margin-top: 0;
+}
+
+@media (max-width: 1320px) {
+  .day-sessions-modal-content {
+    width: min(1180px, 96vw);
+  }
+  .day-sessions-modal-content .session-top {
+    grid-template-columns: auto minmax(132px, 156px) minmax(132px, 156px) minmax(220px, 1fr) auto auto minmax(220px, 1fr) auto;
+  }
+}
+
 .account-form {
   grid-template-columns: 2fr 1fr auto;
 }
