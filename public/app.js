@@ -163,7 +163,33 @@ const uiState = {
   },
   calendar: getInitialCalendarState(),
   daySessionsModalDate: "",
+  symbolEditor: {
+    editingTicker: "",
+  },
 };
+
+const OVERLAY_MODAL_IDS = [
+  "imageModal",
+  "linkModal",
+  "playbookDetailModal",
+  "accountDetailModal",
+  "accountGroupPickerModal",
+  "accountEntityModal",
+  "ruleDetailModal",
+  "groupBuilderModal",
+  "deleteEntityModal",
+  "daySessionsModal",
+  "analysisDrilldownModal",
+];
+
+function isModalOpen(id) {
+  const modal = document.getElementById(id);
+  return Boolean(modal && !modal.hidden);
+}
+
+function syncBodyScrollLock() {
+  document.body.style.overflow = OVERLAY_MODAL_IDS.some(isModalOpen) ? "hidden" : "";
+}
 
 function pushDeletionHistory(entry) {
   uiState.deletionHistory.push(entry);
@@ -1503,7 +1529,47 @@ function getSessionViewConfig(mode) {
   return SESSION_VIEW_CONFIG[mode] || SESSION_VIEW_CONFIG.journal;
 }
 
+function renderCustomSymbolForm() {
+  const tickerInput = document.getElementById("customSymbolTicker");
+  const tickSizeInput = document.getElementById("customSymbolTickSize");
+  const tickValueInput = document.getElementById("customSymbolTickValue");
+  const primaryButton = document.getElementById("addCustomSymbolBtn");
+  const cancelButton = document.getElementById("cancelCustomSymbolBtn");
+  if (!tickerInput || !tickSizeInput || !tickValueInput || !primaryButton || !cancelButton) return;
+  const editingTicker = uiState.symbolEditor.editingTicker;
+  const symbol = state.customSymbols.find((item) => item.ticker === editingTicker);
+  if (symbol) {
+    tickerInput.value = symbol.ticker;
+    tickSizeInput.value = String(symbol.tickSize);
+    tickValueInput.value = String(symbol.tickValue);
+    primaryButton.textContent = "Save Symbol";
+    cancelButton.hidden = false;
+    return;
+  }
+  uiState.symbolEditor.editingTicker = "";
+  tickerInput.value = "";
+  tickSizeInput.value = "";
+  tickValueInput.value = "";
+  primaryButton.textContent = "+ Add Symbol";
+  cancelButton.hidden = true;
+}
+
+function startEditingCustomSymbol(ticker) {
+  const normalized = String(ticker || "").trim().toUpperCase();
+  if (!normalized || !state.customSymbols.some((item) => item.ticker === normalized)) return;
+  uiState.symbolEditor.editingTicker = normalized;
+  renderCustomSymbolForm();
+  document.getElementById("customSymbolTicker")?.focus();
+}
+
+function clearCustomSymbolEditor({ preserveStatus = false } = {}) {
+  uiState.symbolEditor.editingTicker = "";
+  renderCustomSymbolForm();
+  if (!preserveStatus) setCustomSymbolStatus("");
+}
+
 function renderSymbols() {
+  renderCustomSymbolForm();
   const catalog = document.getElementById("symbolCatalog");
   if (!catalog) return;
   const rows = getAllSymbolOptions().map((ticker) => {
@@ -1526,7 +1592,7 @@ function renderSymbols() {
         </div>
         <div class="symbol-row-actions">
           ${customSymbol
-            ? `<button type="button" data-del-symbol="${ticker}" ${usage.trades ? "disabled" : ""}>${usage.trades ? "In use" : "Remove"}</button>`
+            ? `<button type="button" data-edit-symbol="${ticker}">Edit</button><button type="button" data-del-symbol="${ticker}" ${usage.trades ? "disabled" : ""}>${usage.trades ? "In use" : "Remove"}</button>`
             : `<span class="muted small">Built-in</span>`}
         </div>
       </article>`;
@@ -1575,15 +1641,14 @@ function renderDaySessionsModal() {
   if (!date) {
     modal.hidden = true;
     addButton.hidden = true;
-    if (!document.getElementById("imageModal")?.hidden || !document.getElementById("linkModal")?.hidden || !document.getElementById("playbookDetailModal")?.hidden || !document.getElementById("ruleDetailModal")?.hidden || !document.getElementById("accountDetailModal")?.hidden || !document.getElementById("accountGroupPickerModal")?.hidden || !document.getElementById("accountEntityModal")?.hidden || !document.getElementById("groupBuilderModal")?.hidden || !document.getElementById("deleteEntityModal")?.hidden) return;
-    document.body.style.overflow = "";
+    syncBodyScrollLock();
     return;
   }
   title.textContent = `Sessions for ${date}`;
   addButton.hidden = false;
   renderSessionView("day-modal");
   modal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function openDaySessionsModal(date) {
@@ -1611,7 +1676,26 @@ function renderAnalysisInsightCard(containerId, rows, emptyMessage, formatter) {
   container.innerHTML = `<ul>${rows.map(formatter).join("")}</ul>`;
 }
 
-function renderAnalysisGroupedTable(rows, totalRows) {
+function buildAnalysisTotalsRow(trades, sessions) {
+  const totalNet = trades.reduce((sum, { trade, session }) => sum + calcTradeNet(trade, session), 0);
+  const winningTrades = trades.filter(({ trade, session }) => calcTradeNet(trade, session) > 0).length;
+  const winRate = trades.length ? (winningTrades / trades.length) * 100 : 0;
+  const avgR = trades.length ? trades.reduce((sum, { trade }) => sum + calcSignedR(trade), 0) / trades.length : 0;
+  const expectancy = trades.length ? totalNet / trades.length : 0;
+  const profitFactor = calcProfitFactor(trades);
+  return `
+    <tr class="analysis-table-summary-row">
+      <td><strong>All filtered trades</strong><div class="muted small">${sessions.length} session${sessions.length === 1 ? "" : "s"}</div></td>
+      <td>${trades.length}</td>
+      <td class="${winRate >= 50 ? "good" : "bad"}">${winRate.toFixed(1)}%</td>
+      <td class="${avgR >= 0 ? "good" : "bad"}">${avgR.toFixed(2)}R</td>
+      <td class="${totalNet >= 0 ? "good" : "bad"}">${formatCurrency(totalNet)}</td>
+      <td class="${expectancy >= 0 ? "good" : "bad"}">${formatCurrency(expectancy)}</td>
+      <td class="${profitFactor >= 1 || !Number.isFinite(profitFactor) ? "good" : "bad"}">${formatRatio(profitFactor)}</td>
+    </tr>`;
+}
+
+function renderAnalysisGroupedTable(rows, totalRows, totals) {
   const container = document.getElementById("analysisGroupedTable");
   if (!container) return;
   const columns = [
@@ -1628,10 +1712,11 @@ function renderAnalysisGroupedTable(rows, totalRows) {
     return;
   }
   if (!rows.length) {
-    container.innerHTML = `<p class="analysis-empty-state">No setups meet the ${uiState.filters.analysisMinSampleSize}-trade minimum sample size. Lower the threshold to inspect smaller samples.</p>`;
+    container.innerHTML = `<p class="analysis-empty-state">No setups meet the ${uiState.filters.analysisMinSampleSize}-trade minimum sample size. Lower the threshold to inspect smaller samples.</p><table><tfoot>${buildAnalysisTotalsRow(totals.trades, totals.sessions)}</tfoot></table>`;
     return;
   }
-  container.innerHTML = `<table><thead><tr>${columns.map(([key, label]) => {
+  const hiddenSetupCount = Math.max(0, totalRows.length - rows.length);
+  container.innerHTML = `${hiddenSetupCount ? `<p class="analysis-empty-state analysis-table-note">Showing ${rows.length} setup${rows.length === 1 ? "" : "s"} after the ${uiState.filters.analysisMinSampleSize}-trade minimum. Totals below still reflect all filtered trades.</p>` : ""}<table><thead><tr>${columns.map(([key, label]) => {
     const active = uiState.filters.analysisSortKey === key;
     const direction = active ? uiState.filters.analysisSortDirection : "desc";
     const glyph = !active ? "↕" : (direction === "asc" ? "↑" : "↓");
@@ -1647,7 +1732,7 @@ function renderAnalysisGroupedTable(rows, totalRows) {
       <td class="${row.expectancy >= 0 ? "good" : "bad"}">${formatCurrency(row.expectancy)}</td>
       <td class="${row.profitFactor >= 1 || !Number.isFinite(row.profitFactor) ? "good" : "bad"}">${formatRatio(row.profitFactor)}</td>
     </tr>`;
-  }).join("")}</tbody></table>`;
+  }).join("")}</tbody><tfoot>${buildAnalysisTotalsRow(totals.trades, totals.sessions)}</tfoot></table>`;
 }
 
 function renderAnalysisDrilldownModal(row) {
@@ -1659,7 +1744,7 @@ function renderAnalysisDrilldownModal(row) {
   if (!modal || !title || !meta || !sessionsEl || !tradesEl) return;
   if (!row) {
     modal.hidden = true;
-    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("daySessionsModal").hidden) document.body.style.overflow = "";
+    syncBodyScrollLock();
     return;
   }
   title.textContent = row.setup;
@@ -1685,7 +1770,7 @@ function renderAnalysisDrilldownModal(row) {
       .map((entry) => `<tr><td>${escapeHtml(entry.session.date || "—")}</td><td>${escapeHtml(accountTargetLabel(getTradeAccountTargetId(entry.trade, entry.session)) || "—")}</td><td>${escapeHtml(String(entry.trade.symbol || "—").toUpperCase())}</td><td>${escapeHtml(entry.trade.type === "short" ? "Short" : "Long")}</td><td class="${entry.signedR >= 0 ? "good" : "bad"}">${entry.signedR.toFixed(2)}R</td><td class="${entry.net >= 0 ? "good" : "bad"}">${formatCurrency(entry.net)}</td></tr>`).join("")}</tbody></table>`
     : '<p class="analysis-empty-state">No trades available.</p>';
   modal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function openAnalysisDrilldown(setup) {
@@ -1782,7 +1867,7 @@ function renderAnalysis() {
     }
   }
 
-  renderAnalysisGroupedTable(sortedRows, setupRows);
+  renderAnalysisGroupedTable(sortedRows, setupRows, { trades, sessions });
   const selectedRow = setupRows.find((row) => row.setup === uiState.analysisDrilldownSetup) || null;
   renderAnalysisDrilldownModal(selectedRow);
 
@@ -1850,14 +1935,14 @@ function openRuleModal(ruleId) {
   document.getElementById("ruleDetailTitle").textContent = "Edit Rule";
   document.getElementById("saveRuleBtn").textContent = "Save Rule";
   document.getElementById("ruleDetailModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function closeRuleModal() {
   document.getElementById("ruleDetailModal").hidden = true;
   uiState.activeRuleId = null;
   if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("accountEntityModal").hidden) {
-    document.body.style.overflow = "";
+    syncBodyScrollLock();
   }
 }
 
@@ -2188,13 +2273,13 @@ function openLinkModal(sessionId) {
   document.getElementById("linkUrlInput").value = session.videoLink?.url || "";
   document.getElementById("linkTitleInput").value = session.videoLink?.title || "";
   document.getElementById("linkModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function closeLinkModal() {
   document.getElementById("linkModal").hidden = true;
   uiState.activeLinkSessionId = null;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("ruleDetailModal").hidden) syncBodyScrollLock();
 }
 
 
@@ -2264,7 +2349,7 @@ function openImageModal(src, target) {
   img.style.display = "none";
 
   modal.hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
   resetImageEditorState();
   uiState.imageEditor.lines = structuredClone(targetData?.edits?.lines || []);
   uiState.imageEditor.texts = structuredClone(targetData?.edits?.texts || []);
@@ -2287,7 +2372,7 @@ function closeImageModal() {
   uiState.imageEditor.blockUntil = 0;
   uiState.imageEditor.baseImage = null;
   resetImageEditorState();
-  if (document.getElementById("linkModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("linkModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("ruleDetailModal").hidden) syncBodyScrollLock();
 }
 
 function rerender() {
@@ -2356,7 +2441,7 @@ function addSetup() {
   renderPlaybookModalShot(setup);
   togglePlaybookRemoveButton();
   document.getElementById("playbookDetailModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 
@@ -2377,12 +2462,12 @@ function openAccountModal() {
   document.getElementById("accountModalTptWrap").hidden = true;
   document.getElementById("accountModalGroupPreview").textContent = "No group selected";
   document.getElementById("accountDetailModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function closeAccountModal() {
   document.getElementById("accountDetailModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) syncBodyScrollLock();
 }
 
 function saveAccountFromModal() {
@@ -2432,12 +2517,12 @@ function openAccountGroupPickerModal() {
   uiState.groupPickerExpandedId = "";
   renderAccountGroupCards();
   document.getElementById("accountGroupPickerModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function closeAccountGroupPickerModal() {
   document.getElementById("accountGroupPickerModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden) syncBodyScrollLock();
 }
 
 function refreshGroupBuilderLists() {
@@ -2503,12 +2588,12 @@ function openGroupBuilderModal(editGroupId = null) {
   }
   refreshGroupBuilderLists();
   document.getElementById("groupBuilderModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function closeGroupBuilderModal() {
   document.getElementById("groupBuilderModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden) syncBodyScrollLock();
 }
 
 function saveGroupFromBuilder() {
@@ -2619,12 +2704,12 @@ function openAccountEntityModal(type, id) {
     return;
   }
   document.getElementById("accountEntityModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function closeAccountEntityModal() {
   document.getElementById("accountEntityModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteEntityModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteEntityModal").hidden) syncBodyScrollLock();
 }
 
 function openDeleteEntityModal(type, id) {
@@ -2674,13 +2759,13 @@ function openDeleteEntityModal(type, id) {
   document.getElementById("deleteEntityTitle").textContent = title;
   body.innerHTML = infoHtml;
   document.getElementById("deleteEntityModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 }
 
 function closeDeleteEntityModal() {
   uiState.activeDeleteEntity = null;
   document.getElementById("deleteEntityModal").hidden = true;
-  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteEntityModal").hidden) document.body.style.overflow = "";
+  if (document.getElementById("imageModal").hidden && document.getElementById("playbookDetailModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("accountDetailModal").hidden && document.getElementById("accountGroupPickerModal").hidden && document.getElementById("groupBuilderModal").hidden && document.getElementById("accountEntityModal").hidden && document.getElementById("ruleDetailModal").hidden && document.getElementById("deleteEntityModal").hidden) syncBodyScrollLock();
 }
 
 function confirmDeleteEntity() {
@@ -2789,7 +2874,7 @@ function setCustomSymbolStatus(message) {
   if (status) status.textContent = message;
 }
 
-function addCustomSymbol() {
+function saveCustomSymbol() {
   const tickerInput = document.getElementById("customSymbolTicker");
   const tickSizeInput = document.getElementById("customSymbolTickSize");
   const tickValueInput = document.getElementById("customSymbolTickValue");
@@ -2802,15 +2887,41 @@ function addCustomSymbol() {
     setCustomSymbolStatus("Enter a valid ticker, tick size, and $/tick.");
     return;
   }
-  if (SYMBOL_OPTIONS.includes(candidate.ticker) || state.customSymbols.some((item) => item.ticker === candidate.ticker)) {
+  const editingTicker = uiState.symbolEditor.editingTicker;
+  const duplicateExists = state.customSymbols.some((item) => item.ticker === candidate.ticker && item.ticker !== editingTicker);
+  if (SYMBOL_OPTIONS.includes(candidate.ticker) || duplicateExists) {
     setCustomSymbolStatus("Ticker already exists.");
     return;
   }
-  state.customSymbols.push(candidate);
-  tickerInput.value = "";
-  tickSizeInput.value = "";
-  tickValueInput.value = "";
-  setCustomSymbolStatus(`Added ${candidate.ticker}.`);
+  if (editingTicker) {
+    const symbol = state.customSymbols.find((item) => item.ticker === editingTicker);
+    if (!symbol) {
+      clearCustomSymbolEditor();
+      setCustomSymbolStatus("That symbol is no longer available to edit.");
+      return;
+    }
+    const previousTicker = symbol.ticker;
+    symbol.ticker = candidate.ticker;
+    symbol.tickSize = candidate.tickSize;
+    symbol.tickValue = candidate.tickValue;
+    if (previousTicker !== candidate.ticker) {
+      state.sessions.forEach((session) => {
+        session.trades.forEach((trade) => {
+          if (String(trade.symbol || "").trim().toUpperCase() === previousTicker) {
+            trade.symbol = candidate.ticker;
+            trade.entry = snapPriceToSymbol(trade.entry, trade.symbol);
+            trade.exit = snapPriceToSymbol(trade.exit, trade.symbol);
+          }
+        });
+      });
+      uiState.filters.analysisSymbols = (uiState.filters.analysisSymbols || []).map((item) => item === previousTicker ? candidate.ticker : item);
+    }
+    setCustomSymbolStatus(`Updated ${candidate.ticker}.`);
+  } else {
+    state.customSymbols.push(candidate);
+    setCustomSymbolStatus(`Added ${candidate.ticker}.`);
+  }
+  clearCustomSymbolEditor({ preserveStatus: true });
   rerender();
   tickerInput.focus();
 }
@@ -2860,6 +2971,7 @@ function resetToDemo() {
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions).sort(compareSessionDatesDesc);
   state.customSymbols = [];
+  clearCustomSymbolEditor({ preserveStatus: true });
   rerender();
 }
 
@@ -2994,10 +3106,11 @@ document.getElementById("addRuleBtn").addEventListener("click", () => {
   document.getElementById("ruleDetailTitle").textContent = "Add Rule";
   document.getElementById("saveRuleBtn").textContent = "+ Add Rule";
   document.getElementById("ruleDetailModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 });
 document.getElementById("addSetupBtn").addEventListener("click", addSetup);
-document.getElementById("addCustomSymbolBtn").addEventListener("click", addCustomSymbol);
+document.getElementById("addCustomSymbolBtn").addEventListener("click", saveCustomSymbol);
+document.getElementById("cancelCustomSymbolBtn")?.addEventListener("click", () => clearCustomSymbolEditor());
 document.getElementById("accountsList").addEventListener("click", (e) => {
   const restoreId = e.target.closest("[data-restore-account]")?.dataset.restoreAccount;
   if (restoreId) {
@@ -3049,6 +3162,11 @@ document.getElementById("groupsList").addEventListener("click", (e) => {
 });
 
 document.getElementById("symbolCatalog").addEventListener("click", (e) => {
+  const editSymbol = e.target.closest("[data-edit-symbol]")?.dataset.editSymbol;
+  if (editSymbol) {
+    startEditingCustomSymbol(editSymbol);
+    return;
+  }
   const delSymbol = e.target.closest("[data-del-symbol]")?.dataset.delSymbol;
   if (!delSymbol) return;
   const usage = getCustomSymbolUsage(delSymbol);
@@ -3057,6 +3175,7 @@ document.getElementById("symbolCatalog").addEventListener("click", (e) => {
     return;
   }
   state.customSymbols = state.customSymbols.filter((item) => item.ticker !== delSymbol);
+  if (uiState.symbolEditor.editingTicker === delSymbol) clearCustomSymbolEditor({ preserveStatus: true });
   setCustomSymbolStatus(`Removed ${delSymbol}.`);
   rerender();
 });
@@ -3685,7 +3804,7 @@ document.getElementById("playbookList").addEventListener("click", (e) => {
   renderPlaybookModalShot(setup);
   togglePlaybookRemoveButton();
   document.getElementById("playbookDetailModal").hidden = false;
-  document.body.style.overflow = "hidden";
+  syncBodyScrollLock();
 });
 
 document.getElementById("playbookModalShotBtn").addEventListener("click", (e) => {
@@ -3724,7 +3843,7 @@ document.getElementById("playbookDetailModal").addEventListener("click", (e) => 
     document.getElementById("playbookDetailModal").hidden = true;
     uiState.activePlaybookSetupId = null;
     togglePlaybookRemoveButton();
-    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) document.body.style.overflow = "";
+    if (document.getElementById("imageModal").hidden && document.getElementById("linkModal").hidden && document.getElementById("ruleDetailModal").hidden) syncBodyScrollLock();
   }
 });
 

@@ -402,6 +402,17 @@ button.danger {
   margin: 0;
   color: var(--muted);
 }
+.analysis-table-note {
+  margin-bottom: 10px;
+}
+.analysis-table-summary-row td {
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.04);
+  border-top: 1px solid #47505f;
+}
+.analysis-table-summary-row .muted.small {
+  font-weight: 500;
+}
 .analysis-drilldown-content {
   width: min(1200px, 96vw);
 }
@@ -471,6 +482,8 @@ button.danger {
 .symbol-form-actions {
   display: flex;
   align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .symbol-catalog {
   display: grid;
@@ -514,6 +527,8 @@ button.danger {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .session-card {
   background: linear-gradient(180deg, rgba(37, 43, 53, 0.95), rgba(25, 29, 36, 0.95));
