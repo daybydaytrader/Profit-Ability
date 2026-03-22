@@ -132,6 +132,14 @@ const uiState = {
     journalAccountId: "all",
     journalFrom: "",
     journalTo: "",
+    analysisPreset: "all",
+    analysisFrom: "",
+    analysisTo: "",
+    analysisAccountId: "all",
+    analysisSetups: [],
+    analysisSymbols: [],
+    analysisDirection: "all",
+    analysisRuleMode: "all",
   },
   groupsView: "active",
   imageEditor: {
@@ -687,6 +695,101 @@ function getFilteredSessions({ accountId = "all", from = "", to = "" } = {}) {
     .sort(compareSessionDatesDesc);
 }
 
+function getDateRangeForPreset(preset) {
+  const now = new Date();
+  const end = now.toISOString().slice(0, 10);
+  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  if (preset === "last7") {
+    const start = new Date(now);
+    start.setUTCDate(start.getUTCDate() - 6);
+    return { from: start.toISOString().slice(0, 10), to: end };
+  }
+  if (preset === "last30") {
+    const start = new Date(now);
+    start.setUTCDate(start.getUTCDate() - 29);
+    return { from: start.toISOString().slice(0, 10), to: end };
+  }
+  if (preset === "thisMonth") {
+    return { from: startOfMonth.toISOString().slice(0, 10), to: end };
+  }
+  if (preset === "lastMonth") {
+    const lastMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const lastMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+    return {
+      from: lastMonthStart.toISOString().slice(0, 10),
+      to: lastMonthEnd.toISOString().slice(0, 10),
+    };
+  }
+  if (preset === "ytd") {
+    return {
+      from: `${now.getUTCFullYear()}-01-01`,
+      to: end,
+    };
+  }
+  return { from: "", to: "" };
+}
+
+function syncAnalysisDateRangeFromPreset() {
+  if (uiState.filters.analysisPreset === "custom") return;
+  const { from, to } = getDateRangeForPreset(uiState.filters.analysisPreset);
+  uiState.filters.analysisFrom = from;
+  uiState.filters.analysisTo = to;
+}
+
+function getAnalysisRuleMatch(session) {
+  const checkboxRules = state.rules.filter((rule) => rule.type === "checkbox");
+  if (!checkboxRules.length) return uiState.filters.analysisRuleMode === "all";
+  const allPassed = checkboxRules.every((rule) => Boolean(session.rules?.[rule.id]));
+  if (uiState.filters.analysisRuleMode === "allPassed") return allPassed;
+  if (uiState.filters.analysisRuleMode === "anyFailed") return !allPassed;
+  return true;
+}
+
+function getAnalysisFilteredTrades() {
+  syncAnalysisDateRangeFromPreset();
+  const sessions = getFilteredSessions({
+    accountId: uiState.filters.analysisAccountId,
+    from: uiState.filters.analysisFrom,
+    to: uiState.filters.analysisTo,
+  }).filter((session) => getAnalysisRuleMatch(session));
+  const setupFilter = new Set((uiState.filters.analysisSetups || []).map((item) => String(item || "").trim()).filter(Boolean));
+  const symbolFilter = new Set((uiState.filters.analysisSymbols || []).map((item) => String(item || "").trim().toUpperCase()).filter(Boolean));
+
+  const trades = sessions.flatMap((session) => session.trades
+    .filter((trade) => {
+      const targetId = getTradeAccountTargetId(trade, session);
+      if (uiState.filters.analysisAccountId === "all" && !isActiveTargetId(targetId)) return false;
+      if (uiState.filters.analysisAccountId !== "all" && targetId !== uiState.filters.analysisAccountId) return false;
+      if (uiState.filters.analysisDirection !== "all" && trade.type !== uiState.filters.analysisDirection) return false;
+      const setup = String(trade.setup || "").trim();
+      const symbol = String(trade.symbol || "").trim().toUpperCase();
+      if (setupFilter.size && !setupFilter.has(setup)) return false;
+      if (symbolFilter.size && !symbolFilter.has(symbol)) return false;
+      return true;
+    })
+    .map((trade) => ({ session, trade })));
+
+  return { sessions, trades };
+}
+
+function calcProfitFactor(trades) {
+  const grossProfit = trades.reduce((sum, { trade, session }) => {
+    const pnl = calcTradeNet(trade, session);
+    return pnl > 0 ? sum + pnl : sum;
+  }, 0);
+  const grossLoss = Math.abs(trades.reduce((sum, { trade, session }) => {
+    const pnl = calcTradeNet(trade, session);
+    return pnl < 0 ? sum + pnl : sum;
+  }, 0));
+  if (!grossLoss) return grossProfit > 0 ? Number.POSITIVE_INFINITY : 0;
+  return grossProfit / grossLoss;
+}
+
+function formatRatio(value, digits = 2) {
+  if (!Number.isFinite(value)) return "∞";
+  return value.toFixed(digits);
+}
+
 function getSessionNetForFilter(session, accountId = "all") {
   return session.trades.reduce((acc, trade) => {
     const targetId = getTradeAccountTargetId(trade, session);
@@ -1029,13 +1132,59 @@ function accountOptions(selected = "") {
   return options.join("");
 }
 
+function getAnalysisSetupOptions() {
+  return [...new Set(state.sessions
+    .flatMap((session) => session.trades.map((trade) => String(trade.setup || "").trim()))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function getAnalysisSymbolOptions() {
+  return [...new Set(state.sessions
+    .flatMap((session) => session.trades.map((trade) => String(trade.symbol || "").trim().toUpperCase()))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function renderAnalysisMultiSelect(containerId, options, selectedValues, filterKey) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const selected = new Set((selectedValues || []).map((item) => String(item)));
+  const cleanSelected = [...selected].filter((item) => options.includes(item));
+  if (cleanSelected.length !== selected.size) uiState.filters[filterKey] = cleanSelected;
+  container.classList.toggle("empty", options.length === 0);
+  container.innerHTML = options
+    .map((option) => `<label class="multi-select-option"><input type="checkbox" data-analysis-multi="${filterKey}" value="${escapeHtml(option)}" ${selected.has(option) ? "checked" : ""} />${escapeHtml(option)}</label>`)
+    .join("");
+}
+
 function renderFilterSelects() {
   const equity = document.getElementById("equityAccountFilter");
   const journal = document.getElementById("journalAccountFilter");
+  const analysis = document.getElementById("analysisAccountFilter");
   if (equity) { equity.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.overviewAccountId)}`; equity.value = uiState.filters.overviewAccountId; }
   if (journal) { journal.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.journalAccountId)}`; journal.value = uiState.filters.journalAccountId; }
+  if (analysis) { analysis.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.analysisAccountId)}`; analysis.value = uiState.filters.analysisAccountId; }
   const map = [["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]];
   map.forEach(([id,key]) => { const input = document.getElementById(id); if (input && document.activeElement !== input) input.value = uiState.filters[key]; });
+
+  syncAnalysisDateRangeFromPreset();
+  const preset = document.getElementById("analysisDatePreset");
+  const from = document.getElementById("analysisDateFrom");
+  const to = document.getElementById("analysisDateTo");
+  const direction = document.getElementById("analysisDirectionFilter");
+  const ruleMode = document.getElementById("analysisRuleFilterMode");
+  const fromWrap = document.getElementById("analysisDateFromWrap");
+  const toWrap = document.getElementById("analysisDateToWrap");
+  if (preset) preset.value = uiState.filters.analysisPreset;
+  if (from && document.activeElement !== from) from.value = uiState.filters.analysisFrom;
+  if (to && document.activeElement !== to) to.value = uiState.filters.analysisTo;
+  if (direction) direction.value = uiState.filters.analysisDirection;
+  if (ruleMode) ruleMode.value = uiState.filters.analysisRuleMode;
+  if (fromWrap) fromWrap.hidden = uiState.filters.analysisPreset !== "custom";
+  if (toWrap) toWrap.hidden = uiState.filters.analysisPreset !== "custom";
+  renderAnalysisMultiSelect("analysisSetupFilter", getAnalysisSetupOptions(), uiState.filters.analysisSetups, "analysisSetups");
+  renderAnalysisMultiSelect("analysisSymbolFilter", getAnalysisSymbolOptions(), uiState.filters.analysisSymbols, "analysisSymbols");
 }
 
 function renderAccounts() {
@@ -1363,32 +1512,34 @@ function renderAnalysis() {
   const dayList = document.getElementById("analysisDayList");
   if (!scorecards || !setupList || !symbolList || !dayList) return;
 
-  const sessions = [...state.sessions].sort(compareSessionDatesDesc);
-  const trades = sessions.flatMap((session) => session.trades.map((trade) => ({ session, trade })));
-  const totalNet = sessions.reduce((sum, session) => sum + getSessionNet(session), 0);
-  const avgSessionNet = sessions.length ? totalNet / sessions.length : 0;
-  const winningTrades = trades.filter(({ trade }) => calcTradePnl(trade) > 0).length;
+  renderFilterSelects();
+  const { sessions, trades } = getAnalysisFilteredTrades();
+  const totalNet = trades.reduce((sum, { trade, session }) => sum + calcTradeNet(trade, session), 0);
+  const winningTrades = trades.filter(({ trade, session }) => calcTradeNet(trade, session) > 0).length;
   const avgTradeR = trades.length ? trades.reduce((sum, { trade }) => sum + calcR(trade), 0) / trades.length : 0;
   const winRate = trades.length ? (winningTrades / trades.length) * 100 : 0;
+  const profitFactor = calcProfitFactor(trades);
+  const expectancy = trades.length ? totalNet / trades.length : 0;
 
   scorecards.innerHTML = [
-    ["Total Net P/L", `$${totalNet.toFixed(2)}`, totalNet >= 0],
-    ["Avg Session", `$${avgSessionNet.toFixed(2)}`, avgSessionNet >= 0],
-    ["Trades Reviewed", `${trades.length}`, true],
+    ["Trades", `${trades.length}`, true],
     ["Win Rate", `${winRate.toFixed(1)}%`, winRate >= 50],
-    ["Avg Trade R", `${avgTradeR.toFixed(2)}R`, avgTradeR >= 0],
+    ["Avg R", `${avgTradeR.toFixed(2)}R`, avgTradeR >= 0],
+    ["Net PnL", `$${totalNet.toFixed(2)}`, totalNet >= 0],
+    ["Profit Factor", formatRatio(profitFactor), profitFactor >= 1 || !Number.isFinite(profitFactor)],
+    ["Expectancy", `$${expectancy.toFixed(2)}`, expectancy >= 0],
   ]
     .map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`)
     .join("");
 
   const setupStats = new Map();
-  trades.forEach(({ trade }) => {
+  trades.forEach(({ trade, session }) => {
     const setup = String(trade.setup || "").trim();
     if (!setup) return;
     const current = setupStats.get(setup) || { totalR: 0, trades: 0, net: 0 };
     current.totalR += calcR(trade);
     current.trades += 1;
-    current.net += calcTradePnl(trade);
+    current.net += calcTradeNet(trade, session);
     setupStats.set(setup, current);
   });
   const topSetups = [...setupStats.entries()]
@@ -1405,11 +1556,11 @@ function renderAnalysis() {
     : "<li>No setup data yet.</li>";
 
   const symbolStats = new Map();
-  trades.forEach(({ trade }) => {
+  trades.forEach(({ trade, session }) => {
     const symbol = String(trade.symbol || "").trim().toUpperCase();
     if (!symbol) return;
     const current = symbolStats.get(symbol) || { net: 0, trades: 0 };
-    current.net += calcTradePnl(trade);
+    current.net += calcTradeNet(trade, session);
     current.trades += 1;
     symbolStats.set(symbol, current);
   });
@@ -1421,17 +1572,20 @@ function renderAnalysis() {
     ? topSymbols.map((symbol) => `<li><span class="pill">${escapeHtml(symbol.symbol)}</span> $${symbol.net.toFixed(2)} <span class="muted">· ${symbol.trades} trade${symbol.trades === 1 ? "" : "s"}</span></li>`).join("")
     : "<li>No symbol data yet.</li>";
 
-  const dayStats = sessions
-    .map((session) => ({
-      date: session.date || "—",
-      net: getSessionNet(session),
-      trades: session.trades.length,
-    }))
+  const dayTotals = new Map();
+  trades.forEach(({ session, trade }) => {
+    const date = session.date || "—";
+    const current = dayTotals.get(date) || { date, net: 0, trades: 0 };
+    current.net += calcTradeNet(trade, session);
+    current.trades += 1;
+    dayTotals.set(date, current);
+  });
+  const dayStats = [...dayTotals.values()]
     .sort((a, b) => String(b.date).localeCompare(String(a.date)))
     .slice(0, 10);
   dayList.innerHTML = dayStats.length
     ? dayStats.map((day) => `<li><strong>${escapeHtml(day.date)}</strong> <span class="${day.net >= 0 ? "good" : "bad"}">$${day.net.toFixed(2)}</span> <span class="muted">· ${day.trades} trade${day.trades === 1 ? "" : "s"}</span></li>`).join("")
-    : "<li>No sessions logged yet.</li>";
+    : `<li>No results match the current filters.${sessions.length ? "" : " Add sessions to see analysis."}</li>`;
 }
 
 function renderRules() {
@@ -2745,6 +2899,46 @@ wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
       renderDaySessionsModal();
     } else renderJournal();
   });
+});
+
+[
+  ["analysisDatePreset", "analysisPreset"],
+  ["analysisDateFrom", "analysisFrom"],
+  ["analysisDateTo", "analysisTo"],
+  ["analysisAccountFilter", "analysisAccountId"],
+  ["analysisDirectionFilter", "analysisDirection"],
+  ["analysisRuleFilterMode", "analysisRuleMode"],
+].forEach(([id, key]) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener("input", (e) => {
+    uiState.filters[key] = e.target.value;
+    if (key === "analysisPreset" && e.target.value !== "custom") syncAnalysisDateRangeFromPreset();
+    renderAnalysis();
+  });
+});
+
+document.getElementById("analysisResetFiltersBtn")?.addEventListener("click", () => {
+  uiState.filters.analysisPreset = "all";
+  uiState.filters.analysisFrom = "";
+  uiState.filters.analysisTo = "";
+  uiState.filters.analysisAccountId = "all";
+  uiState.filters.analysisSetups = [];
+  uiState.filters.analysisSymbols = [];
+  uiState.filters.analysisDirection = "all";
+  uiState.filters.analysisRuleMode = "all";
+  renderAnalysis();
+});
+
+document.addEventListener("change", (e) => {
+  const checkbox = e.target.closest("[data-analysis-multi]");
+  if (!checkbox) return;
+  const key = checkbox.dataset.analysisMulti;
+  const values = new Set(uiState.filters[key] || []);
+  if (checkbox.checked) values.add(checkbox.value);
+  else values.delete(checkbox.value);
+  uiState.filters[key] = [...values];
+  renderAnalysis();
 });
 
 document.getElementById("calendarPrevBtn")?.addEventListener("click", () => shiftCalendarMonth(-1));
