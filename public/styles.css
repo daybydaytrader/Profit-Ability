@@ -879,6 +879,13 @@ button.success:hover {
   backdrop-filter: blur(8px);
 }
 
+.day-sessions-modal-content {
+  width: min(1200px, 94vw);
+}
+.day-sessions-modal-content #daySessionsModalList {
+  margin-top: 0;
+}
+
 .account-form {
   grid-template-columns: 2fr 1fr auto;
 }
