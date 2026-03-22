@@ -16,6 +16,7 @@
         <nav id="navTabs" class="nav-tabs">
           <button data-tab="overview" class="active">Overview</button>
           <button data-tab="accounts">Accounts</button>
+          <button data-tab="payouts">Payouts</button>
           <button data-tab="journal">Journal</button>
           <button data-tab="analysis">Analysis</button>
           <button data-tab="symbols">Symbols</button>
@@ -122,6 +123,38 @@
               <button id="groupsViewPastBtn" type="button">Past Groups</button>
             </div>
             <div id="groupsList" class="account-list"></div>
+          </div>
+        </section>
+
+        <section id="tab-payouts" class="tab">
+          <div class="panel">
+            <h2>Payouts</h2>
+            <p class="muted">Track withdrawals, refunds, taxes, fees, and profit splits for accounts and groups.</p>
+            <div class="journal-controls">
+              <button id="addPayoutBtn" type="button">+ Add Payout</button>
+              <button id="resetPayoutFiltersBtn" type="button">Reset Filters</button>
+              <label>Account / Group
+                <select id="payoutAccountFilter"></select>
+              </label>
+              <label>From
+                <input id="payoutDateFrom" type="date" />
+              </label>
+              <label>To
+                <input id="payoutDateTo" type="date" />
+              </label>
+              <label>Type
+                <select id="payoutTypeFilter">
+                  <option value="all">All types</option>
+                </select>
+              </label>
+              <label>Status
+                <select id="payoutStatusFilter">
+                  <option value="all">All statuses</option>
+                </select>
+              </label>
+            </div>
+            <div id="payoutScorecards" class="cards"></div>
+            <div id="payoutList" class="table-wrap payout-table-wrap"></div>
           </div>
         </section>
 

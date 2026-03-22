@@ -21,12 +21,15 @@ const POINT_VALUE_BY_SYMBOL = {
   GC: 100,
   MGC: 10,
 };
+const PAYOUT_TYPE_OPTIONS = ["profit withdrawal", "refund", "fee", "tax reserve", "profit split"];
+const PAYOUT_STATUS_OPTIONS = ["planned", "pending", "processing", "completed", "canceled"];
 
 const seed = {
   accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE, createdAt: new Date().toISOString().slice(0, 10), propFirm: "" }],
   archivedAccounts: [],
   groups: [],
   archivedGroups: [],
+  payouts: [],
   playbook: [{ id: "pb1", title: "ORB", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }, { id: "pb2", title: "Pullback", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }],
   rules: [
     { id: "r1", name: "Entry from plan", type: "checkbox", options: [] },
@@ -62,6 +65,42 @@ function normalizeCustomSymbol(symbol) {
   const tickValue = Number(symbol?.tickValue);
   if (!ticker || !Number.isFinite(tickSize) || tickSize <= 0 || !Number.isFinite(tickValue) || tickValue <= 0) return null;
   return { ticker, tickSize, tickValue };
+}
+
+function normalizeIsoDate(value, fallback = "") {
+  const raw = String(value || "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : fallback;
+}
+
+function normalizePayoutStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return PAYOUT_STATUS_OPTIONS.includes(normalized) ? normalized : "planned";
+}
+
+function normalizePayoutType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return PAYOUT_TYPE_OPTIONS.includes(normalized) ? normalized : PAYOUT_TYPE_OPTIONS[0];
+}
+
+function normalizePayout(payout) {
+  return {
+    id: payout?.id || `po${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
+    accountId: String(payout?.accountId || DEFAULT_ACCOUNT_ID),
+    date: normalizeIsoDate(payout?.date, todayIso()),
+    amount: toNum(payout?.amount),
+    type: normalizePayoutType(payout?.type),
+    destination: String(payout?.destination || "").trim(),
+    reason: String(payout?.reason || "").trim(),
+    profitPeriodStart: normalizeIsoDate(payout?.profitPeriodStart),
+    profitPeriodEnd: normalizeIsoDate(payout?.profitPeriodEnd),
+    bufferAfterPayout: toNum(payout?.bufferAfterPayout),
+    percentageOfProfitWithdrawn: toNum(payout?.percentageOfProfitWithdrawn),
+    percentageOfAccountWithdrawn: toNum(payout?.percentageOfAccountWithdrawn),
+    isRecurring: Boolean(payout?.isRecurring),
+    status: normalizePayoutStatus(payout?.status),
+    referenceId: String(payout?.referenceId || "").trim(),
+    note: String(payout?.note || "").trim(),
+  };
 }
 
 function getAllSymbolOptions() {
@@ -129,6 +168,11 @@ const uiState = {
     overviewAccountId: "all",
     overviewFrom: "",
     overviewTo: "",
+    payoutAccountId: "all",
+    payoutFrom: "",
+    payoutTo: "",
+    payoutType: "all",
+    payoutStatus: "all",
     journalAccountId: "all",
     journalFrom: "",
     journalTo: "",
@@ -209,6 +253,11 @@ function undoLastDeletion() {
     state.sessions.forEach((session) => {
       if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.account.id;
     });
+    if (entry.affectedPayoutIds?.length) {
+      state.payouts.forEach((payout) => {
+        if (entry.affectedPayoutIds.includes(payout.id)) payout.accountId = entry.account.id;
+      });
+    }
   } else if (entry.type === "group") {
     if (entry.archived) {
       state.archivedGroups.splice(entry.index, 0, entry.group);
@@ -221,12 +270,24 @@ function undoLastDeletion() {
         if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.group.id;
       });
     }
+    if (entry.affectedPayoutIds?.length) {
+      state.payouts.forEach((payout) => {
+        if (entry.affectedPayoutIds.includes(payout.id)) payout.accountId = entry.group.id;
+      });
+    }
   } else if (entry.type === "archive-account") {
     state.archivedAccounts = state.archivedAccounts.filter((account) => account.id !== entry.account.id);
     state.accounts.splice(entry.index, 0, normalizeAccount({ ...entry.account, archivedAt: "" }));
+    if (entry.affectedPayoutIds?.length) {
+      state.payouts.forEach((payout) => {
+        if (entry.affectedPayoutIds.includes(payout.id)) payout.accountId = entry.account.id;
+      });
+    }
   } else if (entry.type === "trade") {
     const session = state.sessions.find((item) => item.id === entry.sessionId);
     if (session) session.trades.splice(entry.index, 0, entry.trade);
+  } else if (entry.type === "payout") {
+    state.payouts.splice(entry.index, 0, entry.payout);
   } else if (entry.type === "rule") {
     state.rules.splice(entry.index, 0, entry.rule);
     state.sessions.forEach((session) => {
@@ -455,6 +516,7 @@ function archiveAccount(accountId, reason = "blown") {
   const archivedAccount = normalizeAccount({ ...account, archivedAt, archivedReason: reason === "passed" ? "passed" : "blown", groupAccountsAtArchive });
   const fallback = state.accounts.find((item) => item.id !== accountId)?.id || "";
   const affectedSessionIds = state.sessions.filter((session) => session.accountId === accountId).map((session) => session.id);
+  const affectedPayoutIds = state.payouts.filter((payout) => payout.accountId === accountId).map((payout) => payout.id);
   state.accounts.splice(index, 1);
   state.archivedAccounts.unshift(archivedAccount);
   state.sessions.forEach((session) => {
@@ -463,9 +525,13 @@ function archiveAccount(accountId, reason = "blown") {
       if (getTradeAccountTargetId(trade, session) === accountId) trade.accountId = session.accountId;
     });
   });
+  state.payouts.forEach((payout) => {
+    if (payout.accountId === accountId) payout.accountId = fallback;
+  });
   if (uiState.filters.overviewAccountId === accountId) uiState.filters.overviewAccountId = "all";
+  if (uiState.filters.payoutAccountId === accountId) uiState.filters.payoutAccountId = "all";
   if (uiState.filters.journalAccountId === accountId) uiState.filters.journalAccountId = "all";
-  pushDeletionHistory({ type: "archive-account", account: structuredClone(archivedAccount), index, affectedSessionIds });
+  pushDeletionHistory({ type: "archive-account", account: structuredClone(archivedAccount), index, affectedSessionIds, affectedPayoutIds });
 }
 
 function passAccount(accountId) {
@@ -592,6 +658,7 @@ function loadState() {
   parsed = migrateLegacyToSessions(parsed);
   const rules = Array.isArray(parsed.rules) ? parsed.rules : [];
   const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map(normalizeSession) : [];
+  const payouts = Array.isArray(parsed.payouts) ? parsed.payouts.map(normalizePayout) : [];
   const inferredSetups = sessions.flatMap((session) => session.trades.map((trade) => String(trade.setup || "").trim())).filter(Boolean);
   const playbook = normalizePlaybook(parsed.playbook?.length ? parsed.playbook : inferredSetups);
   const customSymbols = Array.isArray(parsed.customSymbols) ? parsed.customSymbols.map(normalizeCustomSymbol).filter(Boolean) : [];
@@ -611,11 +678,15 @@ function loadState() {
       else trade.accountId = targetId;
     });
   });
+  payouts.forEach((payout) => {
+    if (!accountIds.has(payout.accountId) && !groupIds.has(payout.accountId)) payout.accountId = accounts[0]?.id || "";
+  });
   return {
     accounts,
     archivedAccounts,
     groups,
     archivedGroups,
+    payouts,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
     sessions: (sessions.length ? sessions : structuredClone(seed.sessions)).sort(compareSessionDatesDesc),
@@ -635,6 +706,7 @@ function switchTab(name) {
   document.querySelectorAll(".nav-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.id === `tab-${name}`));
   if (name === "analysis") renderAnalysis();
+  if (name === "payouts") renderPayouts();
 }
 
 
@@ -1254,6 +1326,23 @@ function accountOptions(selected = "") {
   return options.join("");
 }
 
+function targetOptionsWithLegacy(selected = "") {
+  const options = accountOptions(selected);
+  if (!selected) return options;
+  if (getAccountById(selected) || getGroupById(selected)) return options;
+  return `${options}<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)} (legacy)</option>`;
+}
+
+function payoutTypeOptions(selected = "all", includeAll = false) {
+  const options = PAYOUT_TYPE_OPTIONS.map((type) => `<option value="${escapeHtml(type)}" ${selected === type ? "selected" : ""}>${escapeHtml(type)}</option>`);
+  return `${includeAll ? `<option value="all" ${selected === "all" ? "selected" : ""}>All types</option>` : ""}${options.join("")}`;
+}
+
+function payoutStatusOptions(selected = "all", includeAll = false) {
+  const options = PAYOUT_STATUS_OPTIONS.map((status) => `<option value="${escapeHtml(status)}" ${selected === status ? "selected" : ""}>${escapeHtml(status)}</option>`);
+  return `${includeAll ? `<option value="all" ${selected === "all" ? "selected" : ""}>All statuses</option>` : ""}${options.join("")}`;
+}
+
 function getAnalysisSetupOptions() {
   return [...new Set(state.sessions
     .flatMap((session) => session.trades.map((trade) => String(trade.setup || "").trim()))
@@ -1282,12 +1371,18 @@ function renderAnalysisMultiSelect(containerId, options, selectedValues, filterK
 
 function renderFilterSelects() {
   const equity = document.getElementById("equityAccountFilter");
+  const payout = document.getElementById("payoutAccountFilter");
+  const payoutType = document.getElementById("payoutTypeFilter");
+  const payoutStatus = document.getElementById("payoutStatusFilter");
   const journal = document.getElementById("journalAccountFilter");
   const analysis = document.getElementById("analysisAccountFilter");
   if (equity) { equity.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.overviewAccountId)}`; equity.value = uiState.filters.overviewAccountId; }
+  if (payout) { payout.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.payoutAccountId)}`; payout.value = uiState.filters.payoutAccountId; }
+  if (payoutType) payoutType.innerHTML = payoutTypeOptions(uiState.filters.payoutType, true);
+  if (payoutStatus) payoutStatus.innerHTML = payoutStatusOptions(uiState.filters.payoutStatus, true);
   if (journal) { journal.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.journalAccountId)}`; journal.value = uiState.filters.journalAccountId; }
   if (analysis) { analysis.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.analysisAccountId)}`; analysis.value = uiState.filters.analysisAccountId; }
-  const map = [["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]];
+  const map = [["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["payoutDateFrom","payoutFrom"],["payoutDateTo","payoutTo"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]];
   map.forEach(([id,key]) => { const input = document.getElementById(id); if (input && document.activeElement !== input) input.value = uiState.filters[key]; });
 
   syncAnalysisDateRangeFromPreset();
@@ -1629,6 +1724,76 @@ function getCompanionSessionModes(sourceMode) {
 
 function getDaySessionsModalSessions(date) {
   return getFilteredSessions({ accountId: uiState.filters.overviewAccountId }).filter((session) => session.date === date);
+}
+
+function getFilteredPayouts({ accountId = "all", from = "", to = "", type = "all", status = "all" } = {}) {
+  return state.payouts
+    .filter((payout) => {
+      const targetId = String(payout.accountId || "");
+      if (accountId === "all") {
+        if (!isActiveTargetId(targetId)) return false;
+      } else if (targetId !== accountId) return false;
+      if (from && payout.date < from) return false;
+      if (to && payout.date > to) return false;
+      if (type !== "all" && payout.type !== type) return false;
+      if (status !== "all" && payout.status !== status) return false;
+      return true;
+    })
+    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.id || "").localeCompare(String(a.id || "")));
+}
+
+function renderPayoutRows(payouts) {
+  return payouts.map((payout) => `
+    <tr>
+      <td><input type="date" data-payout-k="date" data-payout-id="${payout.id}" value="${escapeHtml(payout.date || "")}" /></td>
+      <td><select data-payout-k="accountId" data-payout-id="${payout.id}">${targetOptionsWithLegacy(payout.accountId)}</select></td>
+      <td><input type="number" step="0.01" data-payout-k="amount" data-payout-id="${payout.id}" value="${Number(payout.amount || 0)}" /></td>
+      <td><select data-payout-k="type" data-payout-id="${payout.id}">${payoutTypeOptions(payout.type)}</select></td>
+      <td><input type="text" data-payout-k="destination" data-payout-id="${payout.id}" value="${escapeHtml(payout.destination || "")}" placeholder="Bank / wallet / reserve" /></td>
+      <td><input type="text" data-payout-k="reason" data-payout-id="${payout.id}" value="${escapeHtml(payout.reason || "")}" placeholder="Reason" /></td>
+      <td><input type="date" data-payout-k="profitPeriodStart" data-payout-id="${payout.id}" value="${escapeHtml(payout.profitPeriodStart || "")}" /></td>
+      <td><input type="date" data-payout-k="profitPeriodEnd" data-payout-id="${payout.id}" value="${escapeHtml(payout.profitPeriodEnd || "")}" /></td>
+      <td><input type="number" step="0.01" data-payout-k="bufferAfterPayout" data-payout-id="${payout.id}" value="${Number(payout.bufferAfterPayout || 0)}" /></td>
+      <td><input type="number" step="0.01" data-payout-k="percentageOfProfitWithdrawn" data-payout-id="${payout.id}" value="${Number(payout.percentageOfProfitWithdrawn || 0)}" /></td>
+      <td><input type="number" step="0.01" data-payout-k="percentageOfAccountWithdrawn" data-payout-id="${payout.id}" value="${Number(payout.percentageOfAccountWithdrawn || 0)}" /></td>
+      <td><label class="payout-checkbox-cell"><input type="checkbox" data-payout-k="isRecurring" data-payout-id="${payout.id}" ${payout.isRecurring ? "checked" : ""} />Recurring</label></td>
+      <td><select data-payout-k="status" data-payout-id="${payout.id}">${payoutStatusOptions(payout.status)}</select></td>
+      <td><input type="text" data-payout-k="referenceId" data-payout-id="${payout.id}" value="${escapeHtml(payout.referenceId || "")}" placeholder="Reference #" /></td>
+      <td><textarea rows="2" data-payout-k="note" data-payout-id="${payout.id}" placeholder="Notes">${escapeHtml(payout.note || "")}</textarea></td>
+      <td><button type="button" data-del-payout="${payout.id}">Delete</button></td>
+    </tr>
+  `).join("");
+}
+
+function renderPayouts() {
+  const scorecards = document.getElementById("payoutScorecards");
+  const list = document.getElementById("payoutList");
+  if (!scorecards || !list) return;
+  renderFilterSelects();
+  const payouts = getFilteredPayouts({
+    accountId: uiState.filters.payoutAccountId,
+    from: uiState.filters.payoutFrom,
+    to: uiState.filters.payoutTo,
+    type: uiState.filters.payoutType,
+    status: uiState.filters.payoutStatus,
+  });
+  const total = payouts.reduce((sum, payout) => sum + payout.amount, 0);
+  const completedTotal = payouts.filter((payout) => payout.status === "completed").reduce((sum, payout) => sum + payout.amount, 0);
+  const pendingTotal = payouts.filter((payout) => ["planned", "pending", "processing"].includes(payout.status)).reduce((sum, payout) => sum + payout.amount, 0);
+  const recurringCount = payouts.filter((payout) => payout.isRecurring).length;
+  scorecards.innerHTML = [
+    ["Records", String(payouts.length), true],
+    ["Total Amount", formatCurrency(total), true],
+    ["Completed", formatCurrency(completedTotal), true],
+    ["Open Pipeline", formatCurrency(pendingTotal), true],
+    ["Recurring", String(recurringCount), recurringCount > 0],
+  ].map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`).join("");
+
+  if (!payouts.length) {
+    list.innerHTML = '<p class="muted">No payouts match the current filters.</p>';
+    return;
+  }
+  list.innerHTML = `<table><thead><tr><th>Date</th><th>Account / Group</th><th>Amount</th><th>Type</th><th>Destination</th><th>Reason</th><th>Profit Start</th><th>Profit End</th><th>Buffer</th><th>% Profit</th><th>% Account</th><th>Recurring</th><th>Status</th><th>Reference</th><th>Note</th><th>Actions</th></tr></thead><tbody>${renderPayoutRows(payouts)}</tbody></table>`;
 }
 
 function renderDaySessionsModal() {
@@ -2380,6 +2545,7 @@ function rerender() {
   saveState();
   renderFilterSelects();
   renderOverview();
+  renderPayouts();
   renderJournal();
   renderAnalysis();
   renderSymbols();
@@ -2389,6 +2555,27 @@ function rerender() {
   renderMistakes();
   renderAccounts();
   renderUndoState();
+}
+
+function createPayoutWithDefaults(date = todayIso()) {
+  return normalizePayout({
+    id: `po${Date.now()}`,
+    accountId: state.accounts[0]?.id || state.groups[0]?.id || "",
+    date,
+    amount: 0,
+    type: PAYOUT_TYPE_OPTIONS[0],
+    destination: "",
+    reason: "",
+    profitPeriodStart: "",
+    profitPeriodEnd: "",
+    bufferAfterPayout: 0,
+    percentageOfProfitWithdrawn: 0,
+    percentageOfAccountWithdrawn: 0,
+    isRecurring: false,
+    status: "planned",
+    referenceId: "",
+    note: "",
+  });
 }
 
 function createSessionWithDefaults(date = todayIso()) {
@@ -2408,6 +2595,11 @@ function createSessionWithDefaults(date = todayIso()) {
 function addSession(date = todayIso()) {
   state.sessions.unshift(createSessionWithDefaults(date));
   state.sessions.sort(compareSessionDatesDesc);
+  rerender();
+}
+
+function addPayout(date = todayIso()) {
+  state.payouts.unshift(createPayoutWithDefaults(date));
   rerender();
 }
 
@@ -2749,6 +2941,12 @@ function openDeleteEntityModal(type, id) {
     title = "Delete Trade";
     infoHtml = `<p><strong>Session:</strong> ${escapeHtml(session.date || "(no date)")}</p><p><strong>Symbol:</strong> ${escapeHtml(trade.symbol)}</p><p><strong>Setup:</strong> ${escapeHtml(trade.setup || "—")}</p><p><strong>PnL:</strong> $${calcTradePnl(trade).toFixed(2)}</p>`;
   }
+  if (type === "payout") {
+    const payout = state.payouts.find((item) => item.id === id);
+    if (!payout) return;
+    title = "Delete Payout";
+    infoHtml = `<p><strong>Date:</strong> ${escapeHtml(payout.date || "—")}</p><p><strong>Target:</strong> ${escapeHtml(accountTargetLabel(payout.accountId) || "—")}</p><p><strong>Type:</strong> ${escapeHtml(payout.type)}</p><p><strong>Amount:</strong> ${formatCurrency(payout.amount)}</p>`;
+  }
   if (type === "rule") {
     const rule = state.rules.find((item) => item.id === id);
     if (!rule) return;
@@ -2800,12 +2998,17 @@ function confirmDeleteEntity() {
     if (index >= 0 && account) {
       const fallback = state.accounts.find((item) => item.id !== target.id)?.id || "";
       const affectedSessionIds = state.sessions.filter((session) => session.accountId === target.id).map((session) => session.id);
-      pushDeletionHistory({ type: "account", account: structuredClone(account), index, affectedSessionIds });
+      const affectedPayoutIds = state.payouts.filter((payout) => payout.accountId === target.id).map((payout) => payout.id);
+      pushDeletionHistory({ type: "account", account: structuredClone(account), index, affectedSessionIds, affectedPayoutIds });
       state.accounts.splice(index, 1);
       state.sessions.forEach((session) => {
         if (session.accountId === target.id) session.accountId = fallback;
       });
+      state.payouts.forEach((payout) => {
+        if (payout.accountId === target.id) payout.accountId = fallback;
+      });
       if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
+      if (uiState.filters.payoutAccountId === target.id) uiState.filters.payoutAccountId = "all";
       if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
     }
   } else if (target.type === "group") {
@@ -2816,7 +3019,8 @@ function confirmDeleteEntity() {
       const memberAccountIds = state.accounts.filter((account) => account.groupId === target.id).map((account) => account.id);
       const fallback = state.accounts[0]?.id || "";
       const affectedSessionIds = state.sessions.filter((session) => session.accountId === target.id).map((session) => session.id);
-      pushDeletionHistory({ type: "group", group: structuredClone(group), index, memberAccountIds, affectedSessionIds, archived: false });
+      const affectedPayoutIds = state.payouts.filter((payout) => payout.accountId === target.id).map((payout) => payout.id);
+      pushDeletionHistory({ type: "group", group: structuredClone(group), index, memberAccountIds, affectedSessionIds, affectedPayoutIds, archived: false });
       state.groups.splice(index, 1);
       state.accounts.forEach((account) => {
         if (account.groupId === target.id) account.groupId = "";
@@ -2824,12 +3028,17 @@ function confirmDeleteEntity() {
       state.sessions.forEach((session) => {
         if (session.accountId === target.id) session.accountId = fallback;
       });
+      state.payouts.forEach((payout) => {
+        if (payout.accountId === target.id) payout.accountId = fallback;
+      });
       if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
+      if (uiState.filters.payoutAccountId === target.id) uiState.filters.payoutAccountId = "all";
       if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
     } else if (archivedIndex >= 0 && group) {
       pushDeletionHistory({ type: "group", group: structuredClone(group), index: archivedIndex, archived: true });
       state.archivedGroups.splice(archivedIndex, 1);
       if (uiState.filters.overviewAccountId === target.id) uiState.filters.overviewAccountId = "all";
+      if (uiState.filters.payoutAccountId === target.id) uiState.filters.payoutAccountId = "all";
       if (uiState.filters.journalAccountId === target.id) uiState.filters.journalAccountId = "all";
     }
   } else if (target.type === "trade") {
@@ -2840,6 +3049,12 @@ function confirmDeleteEntity() {
         pushDeletionHistory({ type: "trade", sessionId: session.id, trade: structuredClone(session.trades[index]), index });
         session.trades.splice(index, 1);
       }
+    }
+  } else if (target.type === "payout") {
+    const index = state.payouts.findIndex((payout) => payout.id === target.id);
+    if (index >= 0) {
+      pushDeletionHistory({ type: "payout", payout: structuredClone(state.payouts[index]), index });
+      state.payouts.splice(index, 1);
     }
   } else if (target.type === "rule") {
     const index = state.rules.findIndex((rule) => rule.id === target.id);
@@ -2950,6 +3165,7 @@ function importBackupFile(file) {
       state.accounts = (Array.isArray(migrated.accounts) ? migrated.accounts : [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE }]).map(normalizeAccount);
       state.groups = (Array.isArray(migrated.groups) ? migrated.groups : []).map(normalizeGroup);
       state.archivedGroups = (Array.isArray(migrated.archivedGroups) ? migrated.archivedGroups : []).map(normalizeGroup);
+      state.payouts = (Array.isArray(migrated.payouts) ? migrated.payouts : []).map(normalizePayout);
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
       state.rules = migrated.rules;
@@ -2967,6 +3183,7 @@ function resetToDemo() {
   state.accounts = structuredClone(seed.accounts);
   state.groups = structuredClone(seed.groups);
   state.archivedGroups = structuredClone(seed.archivedGroups || []);
+  state.payouts = structuredClone(seed.payouts || []);
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
   state.sessions = structuredClone(seed.sessions).sort(compareSessionDatesDesc);
@@ -2981,6 +3198,16 @@ function resetJournalFilters() {
   uiState.filters.journalTo = "";
   renderFilterSelects();
   renderJournal();
+}
+
+function resetPayoutFilters() {
+  uiState.filters.payoutAccountId = "all";
+  uiState.filters.payoutFrom = "";
+  uiState.filters.payoutTo = "";
+  uiState.filters.payoutType = "all";
+  uiState.filters.payoutStatus = "all";
+  renderFilterSelects();
+  renderPayouts();
 }
 
 function updateSessionField(target) {
@@ -3032,6 +3259,20 @@ function updateTradeField(target, formatDisplay = false) {
   } else trade[key] = target.value;
 
   return { session, trade };
+}
+
+function updatePayoutField(target) {
+  const payout = state.payouts.find((item) => item.id === target.dataset.payoutId);
+  if (!payout) return null;
+  const key = target.dataset.payoutK;
+  if (!key) return null;
+  if (key === "isRecurring") payout[key] = Boolean(target.checked);
+  else if (["amount", "bufferAfterPayout", "percentageOfProfitWithdrawn", "percentageOfAccountWithdrawn"].includes(key)) payout[key] = toNum(target.value);
+  else if (["date", "profitPeriodStart", "profitPeriodEnd"].includes(key)) payout[key] = normalizeIsoDate(target.value);
+  else if (key === "type") payout[key] = normalizePayoutType(target.value);
+  else if (key === "status") payout[key] = normalizePayoutStatus(target.value);
+  else payout[key] = String(target.value || "").trim();
+  return payout;
 }
 
 function updateAllCounters() {
@@ -3092,10 +3333,12 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
 });
 
 document.getElementById("addSessionBtn").addEventListener("click", addSession);
+document.getElementById("addPayoutBtn")?.addEventListener("click", () => addPayout());
 document.getElementById("daySessionsModalAddBtn")?.addEventListener("click", () => {
   if (!uiState.daySessionsModalDate) return;
   addSession(uiState.daySessionsModalDate);
 });
+document.getElementById("resetPayoutFiltersBtn")?.addEventListener("click", resetPayoutFilters);
 document.getElementById("resetJournalFiltersBtn")?.addEventListener("click", resetJournalFilters);
 document.getElementById("addRuleBtn").addEventListener("click", () => {
   uiState.activeRuleId = null;
@@ -3239,7 +3482,7 @@ document.getElementById("saveGroupBuilderBtn").addEventListener("click", saveGro
 wireGroupBuilderDnD(document.getElementById("groupBuilderAvailable"), false);
 wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
 
-[["equityAccountFilter","overviewAccountId"],["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["journalAccountFilter","journalAccountId"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]].forEach(([id,key]) => {
+[["equityAccountFilter","overviewAccountId"],["equityDateFrom","overviewFrom"],["equityDateTo","overviewTo"],["payoutAccountFilter","payoutAccountId"],["payoutDateFrom","payoutFrom"],["payoutDateTo","payoutTo"],["payoutTypeFilter","payoutType"],["payoutStatusFilter","payoutStatus"],["journalAccountFilter","journalAccountId"],["journalDateFrom","journalFrom"],["journalDateTo","journalTo"]].forEach(([id,key]) => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener("input", (e) => {
@@ -3247,6 +3490,8 @@ wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
     if (key.startsWith("overview")) {
       renderOverview();
       renderDaySessionsModal();
+    } else if (key.startsWith("payout")) {
+      renderPayouts();
     } else renderJournal();
   });
 });
@@ -3346,6 +3591,12 @@ document.getElementById("overviewCalendarGrid")?.addEventListener("click", (e) =
 });
 
 document.addEventListener("input", (e) => {
+  const payoutTarget = e.target.closest("#payoutList [data-payout-k]");
+  if (payoutTarget) {
+    updatePayoutField(payoutTarget);
+    saveState();
+    return;
+  }
   const container = e.target.closest("#sessionList, #daySessionsModalList");
   if (!container) return;
   const t = e.target;
@@ -3385,6 +3636,13 @@ document.getElementById("modalShotInput").addEventListener("change", (e) => {
 });
 
 document.addEventListener("change", (e) => {
+  const payoutTarget = e.target.closest("#payoutList [data-payout-k]");
+  if (payoutTarget) {
+    updatePayoutField(payoutTarget);
+    saveState();
+    renderPayouts();
+    return;
+  }
   const container = e.target.closest("#sessionList, #daySessionsModalList");
   if (!container) return;
   const t = e.target;
@@ -3414,6 +3672,11 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("click", (e) => {
+  const payoutId = e.target.closest("[data-del-payout]")?.dataset.delPayout;
+  if (payoutId) {
+    openDeleteEntityModal("payout", payoutId);
+    return;
+  }
   const sessionContainer = e.target.closest("#sessionList, #daySessionsModalList");
   if (!sessionContainer) return;
   const playLinkId = e.target.closest("[data-play-link]")?.dataset.playLink;
