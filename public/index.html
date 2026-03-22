@@ -149,7 +149,52 @@
           <div class="panel">
             <h2>Analysis</h2>
             <p class="muted">Review aggregate performance without changing Journal behavior.</p>
-            <div id="analysisScorecards" class="cards"></div>
+            <div class="analysis-toolbar">
+              <label>Date Range
+                <select id="analysisDatePreset">
+                  <option value="all">All time</option>
+                  <option value="last7">Last 7 days</option>
+                  <option value="last30">Last 30 days</option>
+                  <option value="thisMonth">This month</option>
+                  <option value="lastMonth">Last month</option>
+                  <option value="ytd">Year to date</option>
+                  <option value="custom">Custom range</option>
+                </select>
+              </label>
+              <label id="analysisDateFromWrap">From
+                <input id="analysisDateFrom" type="date" />
+              </label>
+              <label id="analysisDateToWrap">To
+                <input id="analysisDateTo" type="date" />
+              </label>
+              <label>Account / Group
+                <select id="analysisAccountFilter"></select>
+              </label>
+              <label>Direction
+                <select id="analysisDirectionFilter">
+                  <option value="all">All directions</option>
+                  <option value="long">Long only</option>
+                  <option value="short">Short only</option>
+                </select>
+              </label>
+              <label>Rule Filter
+                <select id="analysisRuleFilterMode">
+                  <option value="all">All sessions</option>
+                  <option value="allPassed">All checkbox rules passed</option>
+                  <option value="anyFailed">Any checkbox rule failed</option>
+                </select>
+              </label>
+              <div class="analysis-filter-field">
+                <span class="analysis-filter-label">Setups</span>
+                <div id="analysisSetupFilter" class="multi-select"></div>
+              </div>
+              <div class="analysis-filter-field">
+                <span class="analysis-filter-label">Symbols</span>
+                <div id="analysisSymbolFilter" class="multi-select"></div>
+              </div>
+              <button id="analysisResetFiltersBtn" type="button">Reset Filters</button>
+            </div>
+            <div id="analysisScorecards" class="analysis-kpi-strip"></div>
           </div>
           <div class="grid2">
             <div class="panel">
