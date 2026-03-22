@@ -12,6 +12,7 @@ const TPT_ACCOUNT_OPTIONS = [
 ];
 
 const SYMBOL_OPTIONS = ["NQ", "MNQ", "ES", "MES", "GC", "MGC"];
+const MONTH_LABELS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const POINT_VALUE_BY_SYMBOL = {
   NQ: 20,
   MNQ: 2,
@@ -83,6 +84,21 @@ function getSymbolConfig(symbol) {
 }
 
 state = loadState();
+
+function getInitialCalendarState() {
+  const latestSessionDate = state.sessions
+    .map((session) => String(session.date || ""))
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const baseDate = latestSessionDate ? new Date(`${latestSessionDate}T00:00:00`) : new Date();
+  return {
+    year: baseDate.getFullYear(),
+    month: baseDate.getMonth(),
+    selectedDay: baseDate.getDate(),
+  };
+}
+
 const uiState = {
   activeImageTarget: null,
   activeLinkSessionId: null,
@@ -119,6 +135,7 @@ const uiState = {
     baseImage: null,
     selectedTextId: null,
   },
+  calendar: getInitialCalendarState(),
 };
 
 function pushDeletionHistory(entry) {
@@ -219,6 +236,16 @@ function formatTradePrice(value, symbol) {
   const step = getPriceStep(symbol);
   const decimals = Math.max(0, String(step).split(".")[1]?.length || 0);
   return formatWithThousands(snapPriceToSymbol(value, symbol), decimals || 2);
+}
+
+function formatCompactCurrency(value) {
+  const compact = new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    compactDisplay: "short",
+    minimumFractionDigits: Math.abs(value) >= 1000 ? 1 : 0,
+    maximumFractionDigits: Math.abs(value) >= 1000 ? 1 : 0,
+  }).format(Math.abs(value));
+  return `${value >= 0 ? "+" : "-"}$${compact}`;
 }
 
 function normalizeTrade(t) {
@@ -747,6 +774,114 @@ function metrics() {
   return { net, trades: allTrades.length, sessions: filteredSessions.length, winRate, ruleScore };
 }
 
+function getCalendarYearOptions() {
+  const years = state.sessions
+    .map((session) => Number.parseInt(String(session.date || "").slice(0, 4), 10))
+    .filter((year) => Number.isFinite(year));
+  const currentYear = new Date().getFullYear();
+  years.push(currentYear);
+  const minYear = Math.min(...years);
+  const maxYear = Math.max(...years);
+  return Array.from({ length: maxYear - minYear + 1 }, (_, index) => minYear + index);
+}
+
+function buildCalendarDaySlots(year, month) {
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const leadingBlanks = firstDay.getDay();
+  const trailingBlanks = (7 - ((leadingBlanks + lastDay.getDate()) % 7 || 7)) % 7;
+  const slots = [];
+
+  for (let index = 0; index < leadingBlanks; index += 1) {
+    slots.push({ type: "blank", id: `blank-start-${index}` });
+  }
+  for (let day = 1; day <= lastDay.getDate(); day += 1) {
+    slots.push({
+      type: "day",
+      id: `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      day,
+      isoDate: `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    });
+  }
+  for (let index = 0; index < trailingBlanks; index += 1) {
+    slots.push({ type: "blank", id: `blank-end-${index}` });
+  }
+  return slots;
+}
+
+function getCalendarDaySummaries() {
+  const selectedTargetId = uiState.filters.overviewAccountId;
+  const summaries = new Map();
+  getFilteredSessions({ accountId: selectedTargetId }).forEach((session) => {
+    if (!session.date) return;
+    const net = getSessionNetForFilter(session, selectedTargetId);
+    const current = summaries.get(session.date) || { net: 0, sessions: 0 };
+    current.net += net;
+    current.sessions += 1;
+    summaries.set(session.date, current);
+  });
+  return summaries;
+}
+
+function syncCalendarState() {
+  const yearOptions = getCalendarYearOptions();
+  if (!yearOptions.length) return;
+  if (!yearOptions.includes(uiState.calendar.year)) {
+    const [fallbackYear] = yearOptions.slice(-1);
+    uiState.calendar.year = fallbackYear;
+  }
+  uiState.calendar.month = Math.min(11, Math.max(0, Number(uiState.calendar.month) || 0));
+  const daysInMonth = new Date(uiState.calendar.year, uiState.calendar.month + 1, 0).getDate();
+  const selectedDay = Number(uiState.calendar.selectedDay) || 1;
+  uiState.calendar.selectedDay = Math.min(daysInMonth, Math.max(1, selectedDay));
+}
+
+function shiftCalendarMonth(offset) {
+  const nextDate = new Date(uiState.calendar.year, uiState.calendar.month + offset, 1);
+  uiState.calendar.year = nextDate.getFullYear();
+  uiState.calendar.month = nextDate.getMonth();
+  syncCalendarState();
+  renderOverviewCalendar();
+}
+
+function renderOverviewCalendar() {
+  syncCalendarState();
+  const monthSelect = document.getElementById("calendarMonthSelect");
+  const yearSelect = document.getElementById("calendarYearSelect");
+  const grid = document.getElementById("overviewCalendarGrid");
+  if (!monthSelect || !yearSelect || !grid) return;
+
+  monthSelect.innerHTML = MONTH_LABELS
+    .map((label, index) => `<option value="${index}" ${index === uiState.calendar.month ? "selected" : ""}>${label}</option>`)
+    .join("");
+
+  yearSelect.innerHTML = getCalendarYearOptions()
+    .map((year) => `<option value="${year}" ${year === uiState.calendar.year ? "selected" : ""}>${year}</option>`)
+    .join("");
+
+  const summaries = getCalendarDaySummaries();
+  const slots = buildCalendarDaySlots(uiState.calendar.year, uiState.calendar.month);
+  grid.innerHTML = slots.map((slot) => {
+    if (slot.type === "blank") return '<div class="calendar-day blank" aria-hidden="true"></div>';
+    const summary = summaries.get(slot.isoDate);
+    const stateClass = !summary ? "empty" : summary.net > 0 ? "win" : summary.net < 0 ? "loss" : "empty";
+    const isSelected = uiState.calendar.selectedDay === slot.day;
+    return `<button
+      type="button"
+      class="calendar-day ${stateClass}${isSelected ? " selected" : ""}"
+      data-calendar-day="${slot.day}"
+      data-calendar-date="${slot.isoDate}"
+      role="gridcell"
+      aria-selected="${isSelected ? "true" : "false"}"
+    >
+      <span class="calendar-day-header">
+        <span class="calendar-day-number">${slot.day}</span>
+      </span>
+      ${summary ? `<span class="calendar-day-pnl ${summary.net >= 0 ? "good" : "bad"}">${formatCompactCurrency(summary.net)}</span>` : '<span class="calendar-day-meta">No sessions</span>'}
+    </button>`;
+  }).join("");
+}
+
 function drawEquity() {
   const root = document.getElementById("equityChart");
   if (!root) return;
@@ -856,6 +991,7 @@ function renderOverview() {
     ? bestSetups.map((setup) => `<li><span class="pill">${setup.winRate.toFixed(0)}%</span> ${escapeHtml(setup.name)} (${setup.wins}/${setup.total})</li>`).join("")
     : "<li>No setup data yet.</li>";
 
+  renderOverviewCalendar();
   drawEquity();
 }
 
@@ -2402,6 +2538,25 @@ wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
     if (key.startsWith("overview")) renderOverview();
     else renderJournal();
   });
+});
+
+document.getElementById("calendarPrevBtn")?.addEventListener("click", () => shiftCalendarMonth(-1));
+document.getElementById("calendarNextBtn")?.addEventListener("click", () => shiftCalendarMonth(1));
+document.getElementById("calendarMonthSelect")?.addEventListener("input", (e) => {
+  uiState.calendar.month = Number(e.target.value || 0);
+  syncCalendarState();
+  renderOverviewCalendar();
+});
+document.getElementById("calendarYearSelect")?.addEventListener("input", (e) => {
+  uiState.calendar.year = Number(e.target.value || new Date().getFullYear());
+  syncCalendarState();
+  renderOverviewCalendar();
+});
+document.getElementById("overviewCalendarGrid")?.addEventListener("click", (e) => {
+  const dayButton = e.target.closest("[data-calendar-day]");
+  if (!dayButton) return;
+  uiState.calendar.selectedDay = Number(dayButton.dataset.calendarDay || 1);
+  renderOverviewCalendar();
 });
 
 document.getElementById("sessionList").addEventListener("input", (e) => {
