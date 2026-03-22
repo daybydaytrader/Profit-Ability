@@ -136,6 +136,7 @@ const uiState = {
     selectedTextId: null,
   },
   calendar: getInitialCalendarState(),
+  daySessionsModalDate: "",
 };
 
 function pushDeletionHistory(entry) {
@@ -1165,21 +1166,8 @@ async function getYoutubeTitle(url) {
   }
 }
 
-function renderJournal() {
-  const customList = document.getElementById("customSymbolList");
-  if (customList) {
-    customList.innerHTML = state.customSymbols.length
-      ? state.customSymbols
-          .map((item) => `<li><strong>${escapeHtml(item.ticker)}</strong> • tick ${item.tickSize} • $${item.tickValue}/tick <button type="button" data-del-symbol="${item.ticker}">Remove</button></li>`)
-          .join("")
-      : '<li class="muted">No custom symbols yet.</li>';
-  }
-  const filteredSessions = getFilteredSessions({
-    accountId: uiState.filters.journalAccountId,
-    from: uiState.filters.journalFrom,
-    to: uiState.filters.journalTo,
-  });
-  const html = filteredSessions
+function renderSessionCards(sessions, emptyMessage = "No sessions yet.") {
+  return sessions
     .map((s) => {
       const net = getSessionNet(s);
       const adherence = getSessionRuleAdherence(s);
@@ -1231,9 +1219,59 @@ function renderJournal() {
         }
       </article>`;
     })
-    .join("");
+    .join("") || `<p class="muted">${escapeHtml(emptyMessage)}</p>`;
+}
 
-  document.getElementById("sessionList").innerHTML = html || '<p class="muted">No sessions yet.</p>';
+function getDaySessionsModalSessions(date) {
+  return getFilteredSessions({ accountId: uiState.filters.overviewAccountId }).filter((session) => session.date === date);
+}
+
+function renderDaySessionsModal() {
+  const modal = document.getElementById("daySessionsModal");
+  const title = document.getElementById("daySessionsModalTitle");
+  const list = document.getElementById("daySessionsModalList");
+  const date = uiState.daySessionsModalDate;
+  if (!modal || !title || !list) return;
+  if (!date) {
+    modal.hidden = true;
+    if (!document.getElementById("imageModal")?.hidden || !document.getElementById("linkModal")?.hidden || !document.getElementById("playbookDetailModal")?.hidden || !document.getElementById("customSymbolModal")?.hidden || !document.getElementById("ruleDetailModal")?.hidden || !document.getElementById("accountDetailModal")?.hidden || !document.getElementById("accountGroupPickerModal")?.hidden || !document.getElementById("accountEntityModal")?.hidden || !document.getElementById("groupBuilderModal")?.hidden || !document.getElementById("deleteEntityModal")?.hidden) return;
+    document.body.style.overflow = "";
+    return;
+  }
+  title.textContent = `Sessions for ${date}`;
+  list.innerHTML = renderSessionCards(getDaySessionsModalSessions(date), "No sessions match this day.");
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
+  updateAllCounters();
+}
+
+function openDaySessionsModal(date) {
+  if (!date) return;
+  uiState.daySessionsModalDate = date;
+  renderDaySessionsModal();
+}
+
+function closeDaySessionsModal() {
+  uiState.daySessionsModalDate = "";
+  renderDaySessionsModal();
+}
+
+function renderJournal() {
+  const customList = document.getElementById("customSymbolList");
+  if (customList) {
+    customList.innerHTML = state.customSymbols.length
+      ? state.customSymbols
+          .map((item) => `<li><strong>${escapeHtml(item.ticker)}</strong> • tick ${item.tickSize} • $${item.tickValue}/tick <button type="button" data-del-symbol="${item.ticker}">Remove</button></li>`)
+          .join("")
+      : '<li class="muted">No custom symbols yet.</li>';
+  }
+  const filteredSessions = getFilteredSessions({
+    accountId: uiState.filters.journalAccountId,
+    from: uiState.filters.journalFrom,
+    to: uiState.filters.journalTo,
+  });
+
+  document.getElementById("sessionList").innerHTML = renderSessionCards(filteredSessions);
   updateAllCounters();
 }
 
@@ -1726,6 +1764,7 @@ function rerender() {
   renderFilterSelects();
   renderOverview();
   renderJournal();
+  renderDaySessionsModal();
   renderRules();
   renderPlaybook();
   renderMistakes();
@@ -2389,6 +2428,7 @@ function updateTradeComputedUI(sessionId, tradeId) {
 function refreshAnalyticsOnly() {
   saveState();
   renderOverview();
+  renderDaySessionsModal();
   renderMistakes();
 }
 
@@ -2535,8 +2575,10 @@ wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
   if (!el) return;
   el.addEventListener("input", (e) => {
     uiState.filters[key] = e.target.value;
-    if (key.startsWith("overview")) renderOverview();
-    else renderJournal();
+    if (key.startsWith("overview")) {
+      renderOverview();
+      renderDaySessionsModal();
+    } else renderJournal();
   });
 });
 
@@ -2557,9 +2599,12 @@ document.getElementById("overviewCalendarGrid")?.addEventListener("click", (e) =
   if (!dayButton) return;
   uiState.calendar.selectedDay = Number(dayButton.dataset.calendarDay || 1);
   renderOverviewCalendar();
+  openDaySessionsModal(dayButton.dataset.calendarDate || "");
 });
 
-document.getElementById("sessionList").addEventListener("input", (e) => {
+document.addEventListener("input", (e) => {
+  const container = e.target.closest("#sessionList, #daySessionsModalList");
+  if (!container) return;
   const t = e.target;
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
@@ -2597,7 +2642,9 @@ document.getElementById("modalShotInput").addEventListener("change", (e) => {
   e.target.value = "";
 });
 
-document.getElementById("sessionList").addEventListener("change", (e) => {
+document.addEventListener("change", (e) => {
+  const container = e.target.closest("#sessionList, #daySessionsModalList");
+  if (!container) return;
   const t = e.target;
   if (t.dataset.sessionShotInput) {
     const file = t.files?.[0];
@@ -2625,7 +2672,9 @@ document.getElementById("sessionList").addEventListener("change", (e) => {
   }
 });
 
-document.getElementById("sessionList").addEventListener("click", (e) => {
+document.addEventListener("click", (e) => {
+  const sessionContainer = e.target.closest("#sessionList, #daySessionsModalList");
+  if (!sessionContainer) return;
   const playLinkId = e.target.closest("[data-play-link]")?.dataset.playLink;
   if (playLinkId) {
     const session = state.sessions.find((s) => s.id === playLinkId);
@@ -2705,6 +2754,9 @@ document.getElementById("removeLinkBtn").addEventListener("click", () => {
 
 document.getElementById("linkModal").addEventListener("click", (e) => {
   if (e.target.matches("[data-close-link-modal]")) closeLinkModal();
+});
+document.getElementById("daySessionsModal")?.addEventListener("click", (e) => {
+  if (e.target.matches("[data-close-day-sessions-modal]")) closeDaySessionsModal();
 });
 
 document.getElementById("customSymbolModal").addEventListener("click", (e) => {
