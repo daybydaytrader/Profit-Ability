@@ -936,6 +936,50 @@ button.success:hover {
   overflow-x: auto;
   padding-bottom: 4px;
 }
+.day-sessions-modal-content .table-wrap table {
+  table-layout: fixed;
+  font-size: 0.78rem;
+}
+.day-sessions-modal-content .table-wrap th,
+.day-sessions-modal-content .table-wrap td {
+  padding: 6px 4px;
+}
+.day-sessions-modal-content .table-wrap th:nth-child(1),
+.day-sessions-modal-content .table-wrap td:nth-child(1) { width: 9%; }
+.day-sessions-modal-content .table-wrap th:nth-child(2),
+.day-sessions-modal-content .table-wrap td:nth-child(2) { width: 7%; }
+.day-sessions-modal-content .table-wrap th:nth-child(3),
+.day-sessions-modal-content .table-wrap td:nth-child(3) { width: 8%; }
+.day-sessions-modal-content .table-wrap th:nth-child(4),
+.day-sessions-modal-content .table-wrap td:nth-child(4) { width: 6%; }
+.day-sessions-modal-content .table-wrap th:nth-child(5),
+.day-sessions-modal-content .table-wrap td:nth-child(5),
+.day-sessions-modal-content .table-wrap th:nth-child(6),
+.day-sessions-modal-content .table-wrap td:nth-child(6),
+.day-sessions-modal-content .table-wrap th:nth-child(7),
+.day-sessions-modal-content .table-wrap td:nth-child(7),
+.day-sessions-modal-content .table-wrap th:nth-child(8),
+.day-sessions-modal-content .table-wrap td:nth-child(8),
+.day-sessions-modal-content .table-wrap th:nth-child(9),
+.day-sessions-modal-content .table-wrap td:nth-child(9),
+.day-sessions-modal-content .table-wrap th:nth-child(10),
+.day-sessions-modal-content .table-wrap td:nth-child(10),
+.day-sessions-modal-content .table-wrap th:nth-child(11),
+.day-sessions-modal-content .table-wrap td:nth-child(11),
+.day-sessions-modal-content .table-wrap th:nth-child(12),
+.day-sessions-modal-content .table-wrap td:nth-child(12) { width: 6%; }
+.day-sessions-modal-content .table-wrap th:nth-child(13),
+.day-sessions-modal-content .table-wrap td:nth-child(13) { width: 8%; }
+.day-sessions-modal-content .table-wrap th:nth-child(14),
+.day-sessions-modal-content .table-wrap td:nth-child(14) { width: 7%; }
+.day-sessions-modal-content .table-wrap input,
+.day-sessions-modal-content .table-wrap select,
+.day-sessions-modal-content .table-wrap button {
+  width: 100%;
+  min-width: 0;
+  font-size: 0.78rem;
+  padding: 6px 5px;
+}
 
 @media (max-width: 1480px) {
   .day-sessions-modal-content {
