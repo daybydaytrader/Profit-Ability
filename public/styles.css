@@ -258,28 +258,69 @@ button.danger {
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
-.symbol-list {
-  margin: 4px 0 0;
-  padding-left: 18px;
+.symbol-manager {
   display: grid;
-  gap: 6px;
+  gap: 14px;
+  margin-top: 12px;
 }
-.symbol-list li {
-  font-size: 0.85rem;
-}
-.symbol-modal-content {
-  width: min(92vw, 520px);
+.symbol-form {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
+  align-items: end;
 }
-.symbol-modal-content h3 {
-  margin: 2px 0 6px;
-}
-.symbol-modal-content label {
+.symbol-form label {
   display: grid;
   gap: 6px;
   color: var(--muted);
   font-size: 0.85rem;
+}
+.symbol-form-actions {
+  display: flex;
+  align-items: end;
+}
+.symbol-catalog {
+  display: grid;
+  gap: 8px;
+}
+.symbol-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid #3f4654;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(34, 39, 49, 0.92), rgba(25, 29, 36, 0.92));
+}
+.symbol-row.is-custom {
+  border-color: rgba(102, 217, 142, 0.35);
+}
+.symbol-row-primary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.symbol-row-primary strong {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+.symbol-row-metrics {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+}
+.symbol-row-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.symbol-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
 }
 .session-card {
   background: linear-gradient(180deg, rgba(37, 43, 53, 0.95), rgba(25, 29, 36, 0.95));
@@ -1164,9 +1205,22 @@ button.success:hover {
   .calendar-day {
     min-height: 84px;
   }
+
+  .symbol-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .symbol-row-actions {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 720px) {
+  .symbol-form {
+    grid-template-columns: 1fr;
+  }
+
   .calendar-day {
     min-height: 72px;
     padding: 8px;

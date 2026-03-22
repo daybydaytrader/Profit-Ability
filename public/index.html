@@ -17,6 +17,7 @@
           <button data-tab="overview" class="active">Overview</button>
           <button data-tab="accounts">Accounts</button>
           <button data-tab="journal">Journal</button>
+          <button data-tab="symbols">Symbols</button>
           <button data-tab="mistakes">Mistakes</button>
           <button data-tab="playbook">Playbook</button>
           <button data-tab="rules">Rules</button>
@@ -128,7 +129,6 @@
             <h2>Journal</h2>
             <div class="journal-controls">
               <button id="addSessionBtn">+ Add Session</button>
-              <button id="openCustomSymbolModalBtn" type="button">Add Symbol</button>
               <button id="resetJournalFiltersBtn" type="button">Reset Filters</button>
               <label>Account
                 <select id="journalAccountFilter"></select>
@@ -140,11 +140,16 @@
                 <input id="journalDateTo" type="date" />
               </label>
             </div>
-            <div id="customSymbolModal" class="image-modal" hidden>
-              <div class="image-modal-backdrop" data-close-symbol-modal></div>
-              <div class="image-modal-content symbol-modal-content">
-                <button class="image-modal-close" type="button" data-close-symbol-modal aria-label="Close symbol modal">✕</button>
-                <h3>Add custom symbol</h3>
+            <div id="sessionList" class="session-list-column"></div>
+          </div>
+        </section>
+
+        <section id="tab-symbols" class="tab">
+          <div class="panel">
+            <h2>Symbols</h2>
+            <p class="muted">Manage custom symbols while keeping them available in every trade entry dropdown.</p>
+            <div class="symbol-manager">
+              <div class="symbol-form">
                 <label>Ticker
                   <input id="customSymbolTicker" type="text" maxlength="12" placeholder="e.g. RTY" />
                 </label>
@@ -154,14 +159,13 @@
                 <label>$ per tick / contract
                   <input id="customSymbolTickValue" type="number" min="0.0001" step="0.01" placeholder="5" />
                 </label>
-                <div class="link-modal-actions">
-                  <button id="addCustomSymbolBtn" type="button">Add</button>
+                <div class="symbol-form-actions">
+                  <button id="addCustomSymbolBtn" type="button">+ Add Symbol</button>
                 </div>
-                <p id="customSymbolStatus" class="muted small"></p>
-                <ul id="customSymbolList" class="symbol-list"></ul>
               </div>
+              <p id="customSymbolStatus" class="muted small"></p>
+              <div id="symbolCatalog" class="symbol-catalog"></div>
             </div>
-            <div id="sessionList" class="session-list-column"></div>
           </div>
         </section>
 
