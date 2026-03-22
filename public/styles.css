@@ -320,6 +320,36 @@ button.danger {
 .analysis-insight-card li {
   margin-bottom: 6px;
 }
+.analysis-rule-impact {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.analysis-rule-impact-block,
+.analysis-rule-impact-summary {
+  border: 1px solid #3f4654;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.analysis-rule-impact-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.analysis-rule-impact-block p {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.analysis-rule-impact-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .analysis-table-header {
   display: flex;
   justify-content: space-between;

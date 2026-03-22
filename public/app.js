@@ -1758,11 +1758,26 @@ function renderAnalysis() {
       const followedWinRate = ruleImpact.followed.trades ? (ruleImpact.followed.wins / ruleImpact.followed.trades) * 100 : 0;
       const failedWinRate = ruleImpact.notFollowed.trades ? (ruleImpact.notFollowed.wins / ruleImpact.notFollowed.trades) * 100 : 0;
       ruleImpactCard.innerHTML = `
-        <p><strong>Followed</strong> <span class="pill ${followedExpectancy >= 0 ? "good" : "bad"}">${formatCurrency(followedExpectancy)} / trade</span></p>
-        <p class="muted small">${ruleImpact.followed.trades} trades · ${followedWinRate.toFixed(1)}% win rate · ${formatCurrency(ruleImpact.followed.net)} net</p>
-        <p><strong>Not followed</strong> <span class="pill ${failedExpectancy >= 0 ? "good" : "bad"}">${formatCurrency(failedExpectancy)} / trade</span></p>
-        <p class="muted small">${ruleImpact.notFollowed.trades} trades · ${failedWinRate.toFixed(1)}% win rate · ${formatCurrency(ruleImpact.notFollowed.net)} net</p>
-        <p><strong>Delta</strong> <span class="pill ${delta >= 0 ? "good" : "bad"}">${delta >= 0 ? "+" : ""}${formatCurrency(delta).replace(/^\+?/, "")}</span></p>
+        <div class="analysis-rule-impact">
+          <article class="analysis-rule-impact-block">
+            <div class="analysis-rule-impact-head">
+              <strong>Followed</strong>
+              <span class="pill ${followedExpectancy >= 0 ? "good" : "bad"}">${formatCurrency(followedExpectancy)} / trade</span>
+            </div>
+            <p class="muted small">${ruleImpact.followed.trades} trades · ${followedWinRate.toFixed(1)}% win rate · ${formatCurrency(ruleImpact.followed.net)} net</p>
+          </article>
+          <article class="analysis-rule-impact-block">
+            <div class="analysis-rule-impact-head">
+              <strong>Not followed</strong>
+              <span class="pill ${failedExpectancy >= 0 ? "good" : "bad"}">${formatCurrency(failedExpectancy)} / trade</span>
+            </div>
+            <p class="muted small">${ruleImpact.notFollowed.trades} trades · ${failedWinRate.toFixed(1)}% win rate · ${formatCurrency(ruleImpact.notFollowed.net)} net</p>
+          </article>
+          <article class="analysis-rule-impact-summary">
+            <span class="muted small">Expectancy delta</span>
+            <strong class="${delta >= 0 ? "good" : "bad"}">${delta >= 0 ? "+" : ""}${formatCurrency(delta).replace(/^\+?/, "")}</strong>
+          </article>
+        </div>
       `;
     }
   }
