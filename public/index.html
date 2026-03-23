@@ -127,34 +127,203 @@
         </section>
 
         <section id="tab-payouts" class="tab">
-          <div class="panel">
-            <h2>Payouts</h2>
-            <p class="muted">Track withdrawals, refunds, taxes, fees, and profit splits for accounts and groups.</p>
-            <div class="journal-controls">
-              <button id="addPayoutBtn" type="button">+ Add Payout</button>
-              <button id="resetPayoutFiltersBtn" type="button">Reset Filters</button>
-              <label>Account / Group
-                <select id="payoutAccountFilter"></select>
-              </label>
-              <label>From
-                <input id="payoutDateFrom" type="date" />
-              </label>
-              <label>To
-                <input id="payoutDateTo" type="date" />
-              </label>
-              <label>Type
-                <select id="payoutTypeFilter">
-                  <option value="all">All types</option>
-                </select>
-              </label>
-              <label>Status
-                <select id="payoutStatusFilter">
-                  <option value="all">All statuses</option>
-                </select>
-              </label>
+          <div class="panel payouts-screen">
+            <div class="payouts-screen__header">
+              <div>
+                <h2>Payouts</h2>
+                <p class="muted">Track withdrawals, refunds, taxes, fees, and profit splits for accounts and groups with dedicated payout milestones, filters, and timeline context.</p>
+              </div>
+              <span class="pill payout-pill">Payout activity</span>
             </div>
-            <div id="payoutScorecards" class="cards"></div>
-            <div id="payoutList" class="table-wrap payout-table-wrap"></div>
+
+            <div class="grid2 payouts-screen__top">
+              <article class="card payout-card payout-form-card">
+                <div class="payout-section-head">
+                  <div>
+                    <p class="eyebrow">Compact entry</p>
+                    <h3>Log a new payout</h3>
+                  </div>
+                  <span class="pill payout-pill payout-pill--soft">Fast add</span>
+                </div>
+                <div class="grid3 payout-form-grid">
+                  <label>Account / Group
+                    <select>
+                      <option>Topstep 50k</option>
+                      <option>Apex 150k Group</option>
+                      <option>TakeProfitTrader</option>
+                    </select>
+                  </label>
+                  <label>Date
+                    <input type="date" value="2026-03-20" />
+                  </label>
+                  <label>Amount
+                    <input type="number" value="1250" />
+                  </label>
+                  <label>Type
+                    <select>
+                      <option>Profit withdrawal</option>
+                      <option>Refund</option>
+                      <option>Profit split</option>
+                    </select>
+                  </label>
+                  <label>Destination
+                    <input type="text" value="Checking ••••1842" />
+                  </label>
+                  <label>Note
+                    <input type="text" value="Weekly consistency withdrawal" />
+                  </label>
+                </div>
+                <div class="payout-form-actions">
+                  <button id="addPayoutBtn" type="button">+ Add Payout</button>
+                  <button type="button" class="payout-secondary-btn">Save Draft</button>
+                </div>
+              </article>
+
+              <div class="payouts-screen__stack">
+                <article class="card payout-card payout-filter-card">
+                  <div class="payout-section-head">
+                    <div>
+                      <p class="eyebrow">Filters</p>
+                      <h3>Account and date range</h3>
+                    </div>
+                    <button id="resetPayoutFiltersBtn" type="button">Reset Filters</button>
+                  </div>
+                  <div class="journal-controls payout-filter-controls">
+                    <label>Account / Group
+                      <select id="payoutAccountFilter"></select>
+                    </label>
+                    <label>From
+                      <input id="payoutDateFrom" type="date" />
+                    </label>
+                    <label>To
+                      <input id="payoutDateTo" type="date" />
+                    </label>
+                    <label>Type
+                      <select id="payoutTypeFilter">
+                        <option value="all">All types</option>
+                      </select>
+                    </label>
+                    <label>Status
+                      <select id="payoutStatusFilter">
+                        <option value="all">All statuses</option>
+                      </select>
+                    </label>
+                  </div>
+                </article>
+
+                <article class="card payout-card payout-live-card">
+                  <div class="payout-section-head">
+                    <div>
+                      <p class="eyebrow">Live rollup</p>
+                      <h3>Payout performance snapshot</h3>
+                    </div>
+                    <span class="pill payout-pill payout-pill--soft">Filtered</span>
+                  </div>
+                  <div id="payoutScorecards" class="analysis-kpi-strip"></div>
+                </article>
+              </div>
+            </div>
+
+            <div class="analysis-kpi-strip payout-milestones">
+              <article class="card payout-card payout-milestone-card">
+                <p class="eyebrow">First payout</p>
+                <div class="value">Jan 12, 2025</div>
+                <p class="muted small">$480 cleared to Topstep after first consistency cycle.</p>
+              </article>
+              <article class="card payout-card payout-milestone-card">
+                <p class="eyebrow">Largest payout</p>
+                <div class="value">$3,450</div>
+                <p class="muted small">Apex 150k Group on Feb 28, 2026 with a 68% profit split.</p>
+              </article>
+              <article class="card payout-card payout-milestone-card">
+                <p class="eyebrow">Total lifetime payouts</p>
+                <div class="value">$28,940</div>
+                <p class="muted small">Across discretionary withdrawals, refunds, and tax reserve transfers.</p>
+              </article>
+              <article class="card payout-card payout-milestone-card">
+                <p class="eyebrow">Current time since last payout</p>
+                <div class="value">11 days</div>
+                <p class="muted small">Last cash event landed Mar 12, 2026 — useful for pacing your next request.</p>
+              </article>
+            </div>
+
+            <div class="grid2 payouts-screen__bottom">
+              <article class="card payout-card payout-history-card">
+                <div class="payout-section-head">
+                  <div>
+                    <p class="eyebrow">History</p>
+                    <h3>Payout history list</h3>
+                  </div>
+                  <span class="pill payout-pill payout-pill--soft">Table view</span>
+                </div>
+                <p class="muted small">Editable payout records stay in the same dark table system used across the app.</p>
+                <div id="payoutList" class="table-wrap payout-table-wrap"></div>
+              </article>
+
+              <article class="card payout-card payout-timeline-card">
+                <div class="payout-section-head">
+                  <div>
+                    <p class="eyebrow">Timeline</p>
+                    <h3>Payout events</h3>
+                  </div>
+                  <span class="pill payout-pill payout-pill--soft">Distinct payout accent</span>
+                </div>
+                <div class="payout-timeline">
+                  <article class="payout-timeline-item">
+                    <div class="payout-timeline-marker">
+                      <span class="payout-timeline-dot"></span>
+                    </div>
+                    <div class="payout-timeline-content">
+                      <div class="payout-timeline-row">
+                        <strong>Mar 20, 2026</strong>
+                        <span class="pill payout-pill">$1,250</span>
+                      </div>
+                      <p class="muted small">Topstep 50k</p>
+                      <p>Weekly consistency withdrawal sent to Checking ••••1842.</p>
+                    </div>
+                  </article>
+                  <article class="payout-timeline-item">
+                    <div class="payout-timeline-marker">
+                      <span class="payout-timeline-dot"></span>
+                    </div>
+                    <div class="payout-timeline-content">
+                      <div class="payout-timeline-row">
+                        <strong>Mar 12, 2026</strong>
+                        <span class="pill payout-pill">$540</span>
+                      </div>
+                      <p class="muted small">TakeProfitTrader</p>
+                      <p>Refund plus fee adjustment after platform migration.</p>
+                    </div>
+                  </article>
+                  <article class="payout-timeline-item">
+                    <div class="payout-timeline-marker">
+                      <span class="payout-timeline-dot"></span>
+                    </div>
+                    <div class="payout-timeline-content">
+                      <div class="payout-timeline-row">
+                        <strong>Feb 28, 2026</strong>
+                        <span class="pill payout-pill">$3,450</span>
+                      </div>
+                      <p class="muted small">Apex 150k Group</p>
+                      <p>Largest payout to date after month-end review and reserve allocation.</p>
+                    </div>
+                  </article>
+                  <article class="payout-timeline-item">
+                    <div class="payout-timeline-marker">
+                      <span class="payout-timeline-dot"></span>
+                    </div>
+                    <div class="payout-timeline-content">
+                      <div class="payout-timeline-row">
+                        <strong>Jan 12, 2025</strong>
+                        <span class="pill payout-pill">$480</span>
+                      </div>
+                      <p class="muted small">Topstep 50k</p>
+                      <p>First payout milestone marking the initial funded-account withdrawal.</p>
+                    </div>
+                  </article>
+                </div>
+              </article>
+            </div>
           </div>
         </section>
 
