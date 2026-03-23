@@ -3587,22 +3587,28 @@ function createPayoutWithDefaults(date = todayIso()) {
   });
 }
 
-function createSessionWithDefaults(date = todayIso()) {
+function getDefaultSessionTargetId(preferredTargetId = "") {
+  const normalizedPreferredTargetId = String(preferredTargetId || "").trim();
+  if (normalizedPreferredTargetId && isActiveTargetId(normalizedPreferredTargetId)) return normalizedPreferredTargetId;
+  return state.accounts[0]?.id || state.groups[0]?.id || "";
+}
+
+function createSessionWithDefaults(date = todayIso(), preferredTargetId = "") {
   return normalizeSession({
     id: `s${Date.now()}`,
-    date,
+    date: normalizeIsoDate(date, todayIso()),
     day: "",
     mistakes: "",
     correctDecisions: "",
     rules: {},
-    accountId: state.accounts[0]?.id || "",
+    accountId: getDefaultSessionTargetId(preferredTargetId),
     collapsed: true,
     trades: [],
   });
 }
 
-function addSession(date = todayIso()) {
-  state.sessions.unshift(createSessionWithDefaults(date));
+function addSession(date = todayIso(), preferredTargetId = "") {
+  state.sessions.unshift(createSessionWithDefaults(date, preferredTargetId));
   state.sessions.sort(compareSessionDatesDesc);
   rerender();
 }
@@ -4364,11 +4370,11 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
   switchTab(btn.dataset.tab);
 });
 
-document.getElementById("addSessionBtn").addEventListener("click", addSession);
+document.getElementById("addSessionBtn").addEventListener("click", () => addSession());
 document.getElementById("addPayoutBtn")?.addEventListener("click", addPayoutFromDraft);
 document.getElementById("daySessionsModalAddBtn")?.addEventListener("click", () => {
   if (!uiState.daySessionsModalDate) return;
-  addSession(uiState.daySessionsModalDate);
+  addSession(uiState.daySessionsModalDate, uiState.filters.overviewAccountId);
 });
 document.getElementById("resetPayoutFiltersBtn")?.addEventListener("click", resetPayoutFilters);
 document.getElementById("resetJournalFiltersBtn")?.addEventListener("click", resetJournalFilters);
