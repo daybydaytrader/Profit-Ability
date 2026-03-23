@@ -158,30 +158,22 @@
                 </div>
                 <div class="grid3 payout-form-grid">
                   <label>Account / Group
-                    <select>
-                      <option>Topstep 50k</option>
-                      <option>Apex 150k Group</option>
-                      <option>TakeProfitTrader</option>
-                    </select>
+                    <select id="payoutDraftAccountId"></select>
                   </label>
                   <label>Date
-                    <input type="date" value="2026-03-20" />
+                    <input id="payoutDraftDate" type="date" />
                   </label>
                   <label>Amount
-                    <input type="number" value="1250" />
+                    <input id="payoutDraftAmount" type="number" step="0.01" min="0" placeholder="1250" />
                   </label>
                   <label>Type
-                    <select>
-                      <option>Profit withdrawal</option>
-                      <option>Refund</option>
-                      <option>Profit split</option>
-                    </select>
+                    <select id="payoutDraftType"></select>
                   </label>
                   <label>Destination
-                    <input type="text" value="Checking ••••1842" />
+                    <select id="payoutDraftDestination"></select>
                   </label>
                   <label>Note
-                    <input type="text" value="Weekly consistency withdrawal" />
+                    <input id="payoutDraftNote" type="text" placeholder="Weekly consistency withdrawal" />
                   </label>
                 </div>
                 <div class="payout-form-actions">
