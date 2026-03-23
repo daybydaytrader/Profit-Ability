@@ -2662,15 +2662,7 @@ function renderPayoutRows(payouts) {
       <td><input type="number" step="0.01" data-payout-k="amount" data-payout-id="${payout.id}" value="${Number(payout.amount || 0)}" /></td>
       <td><select data-payout-k="type" data-payout-id="${payout.id}">${payoutTypeOptions(payout.type)}</select></td>
       <td><select data-payout-k="destination" data-payout-id="${payout.id}">${payoutDestinationOptions(payout.destination)}</select></td>
-      <td><input type="text" data-payout-k="reason" data-payout-id="${payout.id}" value="${escapeHtml(payout.reason || "")}" placeholder="Reason" /></td>
-      <td><input type="date" data-payout-k="profitPeriodStart" data-payout-id="${payout.id}" value="${escapeHtml(payout.profitPeriodStart || "")}" /></td>
-      <td><input type="date" data-payout-k="profitPeriodEnd" data-payout-id="${payout.id}" value="${escapeHtml(payout.profitPeriodEnd || "")}" /></td>
-      <td><input type="number" step="0.01" data-payout-k="bufferAfterPayout" data-payout-id="${payout.id}" value="${Number(payout.bufferAfterPayout || 0)}" /></td>
-      <td><input type="number" step="0.01" data-payout-k="percentageOfProfitWithdrawn" data-payout-id="${payout.id}" value="${Number(payout.percentageOfProfitWithdrawn || 0)}" /></td>
-      <td><input type="number" step="0.01" data-payout-k="percentageOfAccountWithdrawn" data-payout-id="${payout.id}" value="${Number(payout.percentageOfAccountWithdrawn || 0)}" /></td>
-      <td><label class="payout-checkbox-cell"><input type="checkbox" data-payout-k="isRecurring" data-payout-id="${payout.id}" ${payout.isRecurring ? "checked" : ""} />Recurring</label></td>
       <td><select data-payout-k="status" data-payout-id="${payout.id}">${payoutStatusOptions(payout.status)}</select></td>
-      <td><input type="text" data-payout-k="referenceId" data-payout-id="${payout.id}" value="${escapeHtml(payout.referenceId || "")}" placeholder="Reference #" /></td>
       <td><textarea rows="2" data-payout-k="note" data-payout-id="${payout.id}" placeholder="Notes">${escapeHtml(payout.note || "")}</textarea></td>
       <td><button type="button" data-del-payout="${payout.id}">Delete</button></td>
     </tr>
@@ -2732,7 +2724,7 @@ function renderPayouts() {
     list.innerHTML = '<p class="muted">No payouts match the current filters.</p>';
     return;
   }
-  list.innerHTML = `<table><thead><tr><th>Date</th><th>Account / Group</th><th>Amount</th><th>Type</th><th>Destination</th><th>Reason</th><th>Profit Start</th><th>Profit End</th><th>Buffer</th><th>% Profit</th><th>% Account</th><th>Recurring</th><th>Status</th><th>Reference</th><th>Note</th><th>Actions</th></tr></thead><tbody>${renderPayoutRows(payouts)}</tbody></table>`;
+  list.innerHTML = `<table><thead><tr><th>Date</th><th>Account / Group</th><th>Amount</th><th>Type</th><th>Destination</th><th>Status</th><th>Note</th><th>Actions</th></tr></thead><tbody>${renderPayoutRows(payouts)}</tbody></table>`;
 }
 
 function renderDaySessionsModal() {
