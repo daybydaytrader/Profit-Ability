@@ -989,9 +989,79 @@ function getSessionNetForFilter(session, accountId = "all") {
     const targetId = getTradeAccountTargetId(trade, session);
     if (accountId === "all" && !isActiveTargetId(targetId)) return acc;
     if (accountId !== "all" && targetId !== accountId) return acc;
-    const tradeNet = calcTradePnl(trade) * getTradeMultiplier(trade, session);
-    return acc + tradeNet;
+    return acc + calcTradeNet(trade, session);
   }, 0);
+}
+
+function isPayoutRefundLike(payout) {
+  return payout?.type === "refund";
+}
+
+function isCompletedPayout(payout) {
+  return payout?.status === "completed";
+}
+
+function getStartingBalanceForTarget(targetId = "all") {
+  if (targetId === "all") return state.accounts.reduce((sum, account) => sum + account.startingBalance, 0);
+  const group = getGroupById(targetId);
+  if (group) {
+    const activeMembers = state.accounts.filter((account) => account.groupId === group.id);
+    if (activeMembers.length) return activeMembers.reduce((sum, account) => sum + account.startingBalance, 0);
+    return getGroupMemberCards(group).reduce((sum, member) => sum + toNum(member.startingBalance), 0);
+  }
+  const account = getAccountById(targetId);
+  return account ? account.startingBalance : 0;
+}
+
+function getPayoutSummaryForTarget(targetId = "all", { from = "", to = "", completedOnly = true } = {}) {
+  return state.payouts.reduce((summary, payout) => {
+    const payoutTargetId = String(payout.accountId || "");
+    if (targetId === "all") {
+      if (!isActiveTargetId(payoutTargetId)) return summary;
+    } else if (payoutTargetId !== targetId) return summary;
+    if (from && payout.date < from) return summary;
+    if (to && payout.date > to) return summary;
+    if (completedOnly && !isCompletedPayout(payout)) return summary;
+
+    const amount = Math.abs(toNum(payout.amount));
+    summary.records += 1;
+    if (isPayoutRefundLike(payout)) {
+      summary.totalRefunds += amount;
+      summary.balanceAdjustment += amount;
+    } else {
+      summary.totalPayouts += amount;
+      summary.balanceAdjustment -= amount;
+    }
+    return summary;
+  }, {
+    records: 0,
+    totalPayouts: 0,
+    totalRefunds: 0,
+    balanceAdjustment: 0,
+  });
+}
+
+function getTradingPerformanceSummary(targetId = "all", { from = "", to = "" } = {}) {
+  const filteredSessions = getFilteredSessions({ accountId: targetId, from, to });
+  const startingBalance = getStartingBalanceForTarget(targetId);
+  const grossProfitBeforePayouts = filteredSessions.reduce((sum, session) => sum + getSessionNetForFilter(session, targetId), 0);
+  const grossTradingEquity = startingBalance + grossProfitBeforePayouts;
+  const payoutSummary = getPayoutSummaryForTarget(targetId, { from, to, completedOnly: true });
+  const netAccountBalance = grossTradingEquity + payoutSummary.balanceAdjustment;
+  const payoutsAsPctOfProfits = grossProfitBeforePayouts > 0 ? (payoutSummary.totalPayouts / grossProfitBeforePayouts) * 100 : null;
+  const payoutsAsPctOfBalance = netAccountBalance > 0 ? (payoutSummary.totalPayouts / netAccountBalance) * 100 : null;
+  return {
+    filteredSessions,
+    startingBalance,
+    grossProfitBeforePayouts,
+    grossTradingEquity,
+    netAccountBalance,
+    totalPayouts: payoutSummary.totalPayouts,
+    totalRefunds: payoutSummary.totalRefunds,
+    payoutBalanceAdjustment: payoutSummary.balanceAdjustment,
+    payoutsAsPctOfProfits,
+    payoutsAsPctOfBalance,
+  };
 }
 
 function calcR(trade) {
@@ -1034,24 +1104,19 @@ function getAllTrades() {
 }
 
 function getSessionNet(session) {
-  return session.trades.reduce((acc, trade) => {
-    const tradeNet = calcTradePnl(trade) * getTradeMultiplier(trade, session);
-    return acc + tradeNet;
-  }, 0);
+  return session.trades.reduce((acc, trade) => acc + calcTradeNet(trade, session), 0);
 }
 
 function getSessionTotalNet(session) {
   return getSessionNet(session);
 }
 
+function getAccountFinancialSummary(accountId) {
+  return getTradingPerformanceSummary(accountId);
+}
+
 function getAccountCurrentEquity(accountId) {
-  const account = state.accounts.find((item) => item.id === accountId);
-  if (!account) return 0;
-  const net = state.sessions.reduce((sum, session) => sum + session.trades.reduce((tradeSum, trade) => {
-    const targetId = getTradeAccountTargetId(trade, session);
-    return targetId === accountId ? tradeSum + calcTradePnl(trade) : tradeSum;
-  }, 0), 0);
-  return account.startingBalance + net;
+  return getAccountFinancialSummary(accountId).grossTradingEquity;
 }
 
 function getSessionRuleAdherence(session) {
@@ -1062,20 +1127,21 @@ function getSessionRuleAdherence(session) {
 }
 
 function metrics() {
-  const filteredSessions = getFilteredSessions({
-    accountId: uiState.filters.overviewAccountId,
+  const summary = getTradingPerformanceSummary(uiState.filters.overviewAccountId, {
     from: uiState.filters.overviewFrom,
     to: uiState.filters.overviewTo,
   });
+  const filteredSessions = summary.filteredSessions;
   const selectedTargetId = uiState.filters.overviewAccountId;
-  const allTrades = filteredSessions.flatMap((session) => session.trades.filter((trade) => {
-    const targetId = getTradeAccountTargetId(trade, session);
-    if (selectedTargetId === "all") return isActiveTargetId(targetId);
-    return targetId === selectedTargetId;
-  }));
-  const net = filteredSessions.reduce((acc, session) => acc + getSessionNetForFilter(session, selectedTargetId), 0);
-  const wins = allTrades.filter((t) => calcTradePnl(t) > 0).length;
-  const winRate = allTrades.length ? (wins / allTrades.length) * 100 : 0;
+  const allTradeEntries = filteredSessions.flatMap((session) => session.trades
+    .filter((trade) => {
+      const targetId = getTradeAccountTargetId(trade, session);
+      if (selectedTargetId === "all") return isActiveTargetId(targetId);
+      return targetId === selectedTargetId;
+    })
+    .map((trade) => ({ session, trade })));
+  const wins = allTradeEntries.filter(({ session, trade }) => calcTradeNet(trade, session) > 0).length;
+  const winRate = allTradeEntries.length ? (wins / allTradeEntries.length) * 100 : 0;
 
   const sessionAdherences = filteredSessions
     .map((session) => getSessionRuleAdherence(session))
@@ -1084,7 +1150,14 @@ function metrics() {
     ? sessionAdherences.reduce((acc, value) => acc + value, 0) / sessionAdherences.length
     : 0;
 
-  return { net, trades: allTrades.length, sessions: filteredSessions.length, winRate, ruleScore };
+  return {
+    ...summary,
+    net: summary.grossProfitBeforePayouts,
+    trades: allTradeEntries.length,
+    sessions: filteredSessions.length,
+    winRate,
+    ruleScore,
+  };
 }
 
 function getCalendarYearOptions() {
@@ -1198,24 +1271,53 @@ function renderOverviewCalendar() {
 function drawEquity() {
   const root = document.getElementById("equityChart");
   if (!root) return;
-  const sessions = getFilteredSessions({
-    accountId: uiState.filters.overviewAccountId,
-    from: uiState.filters.overviewFrom,
-    to: uiState.filters.overviewTo,
-  }).sort((a, b) => a.date.localeCompare(b.date));
   const selectedId = uiState.filters.overviewAccountId;
-  const group = selectedId === "all" ? null : getGroupById(selectedId);
-  const account = selectedId === "all" || group ? null : getAccountById(selectedId);
-  const start = group
-    ? state.accounts.filter((account) => account.groupId === group.id).reduce((sum, account) => sum + account.startingBalance, 0)
-    : account
-      ? account.startingBalance
-      : state.accounts.reduce((sum, acc) => sum + acc.startingBalance, 0);
-  const points = [start];
-  sessions.forEach((session) => points.push(points.at(-1) + getSessionNetForFilter(session, selectedId)));
-  const labels = ["Start", ...sessions.map((session) => session.date)];
-  const min = Math.min(...points);
-  const max = Math.max(...points);
+  const from = uiState.filters.overviewFrom;
+  const to = uiState.filters.overviewTo;
+  const sessions = getFilteredSessions({
+    accountId: selectedId,
+    from,
+    to,
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  const payouts = state.payouts
+    .filter((payout) => {
+      const payoutTargetId = String(payout.accountId || "");
+      if (selectedId === "all") {
+        if (!isActiveTargetId(payoutTargetId)) return false;
+      } else if (payoutTargetId !== selectedId) return false;
+      if (from && payout.date < from) return false;
+      if (to && payout.date > to) return false;
+      return isCompletedPayout(payout);
+    })
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.id || "").localeCompare(String(b.id || "")));
+
+  const sessionNetByDate = new Map();
+  sessions.forEach((session) => {
+    if (!session.date) return;
+    sessionNetByDate.set(session.date, (sessionNetByDate.get(session.date) || 0) + getSessionNetForFilter(session, selectedId));
+  });
+  const payoutDeltaByDate = new Map();
+  payouts.forEach((payout) => {
+    const delta = isPayoutRefundLike(payout) ? Math.abs(toNum(payout.amount)) : -Math.abs(toNum(payout.amount));
+    payoutDeltaByDate.set(payout.date, (payoutDeltaByDate.get(payout.date) || 0) + delta);
+  });
+
+  const eventDates = [...new Set([...sessionNetByDate.keys(), ...payoutDeltaByDate.keys()])].sort((a, b) => a.localeCompare(b));
+  const startingBalance = getStartingBalanceForTarget(selectedId);
+  const grossPoints = [startingBalance];
+  const balancePoints = [startingBalance];
+  let runningGross = startingBalance;
+  let runningBalance = startingBalance;
+  eventDates.forEach((date) => {
+    runningGross += sessionNetByDate.get(date) || 0;
+    runningBalance += (sessionNetByDate.get(date) || 0) + (payoutDeltaByDate.get(date) || 0);
+    grossPoints.push(runningGross);
+    balancePoints.push(runningBalance);
+  });
+  const labels = ["Start", ...eventDates];
+  const values = [...grossPoints, ...balancePoints];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
   const range = Math.max(1, max - min);
 
   const left = 64;
@@ -1227,12 +1329,14 @@ function drawEquity() {
   const chartW = w - left - right;
   const chartH = h - top - bottom;
 
-  const pointRows = points.map((value, i) => {
-    const x = left + (i * chartW) / Math.max(points.length - 1, 1);
+  const toPointRows = (series) => series.map((value, index) => {
+    const x = left + (index * chartW) / Math.max(series.length - 1, 1);
     const y = top + ((max - value) / range) * chartH;
     return { x, y, value };
   });
-  const path = pointRows.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+  const grossRows = toPointRows(grossPoints);
+  const balanceRows = toPointRows(balancePoints);
+  const toSvgPath = (rows) => rows.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
 
   const yGrid = Array.from({ length: 4 }, (_, i) => {
     const y = top + i * (chartH / 3);
@@ -1240,16 +1344,24 @@ function drawEquity() {
     return `<line x1="${left}" y1="${y}" x2="${w - right}" y2="${y}" stroke="rgba(217,221,228,0.22)"/><text x="${left - 8}" y="${y + 4}" text-anchor="end" fill="#b6bbc6" font-size="11">$${Math.round(val).toLocaleString()}</text>`;
   }).join("");
 
-  const xTicks = pointRows.map((p, i) => `<text x="${p.x}" y="${h - 12}" text-anchor="middle" fill="#b6bbc6" font-size="10">${labels[i] === "Start" ? "Start" : labels[i].slice(5)}</text>`).join("");
-  const dots = pointRows.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="#d9dde4"/>`).join("");
+  const xTicks = grossRows.map((point, index) => `<text x="${point.x}" y="${h - 12}" text-anchor="middle" fill="#b6bbc6" font-size="10">${labels[index] === "Start" ? "Start" : labels[index].slice(5)}</text>`).join("");
+  const grossDots = grossRows.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" fill="#d9dde4"/>`).join("");
+  const balanceDots = balanceRows.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" fill="#7be0ad"/>`).join("");
+  const legend = `<g><rect x="${left}" y="8" width="12" height="3" rx="1.5" fill="#d9dde4"/><text x="${left + 18}" y="12" fill="#b6bbc6" font-size="11">Gross trading equity</text><rect x="${left + 160}" y="8" width="12" height="3" rx="1.5" fill="#7be0ad"/><text x="${left + 178}" y="12" fill="#b6bbc6" font-size="11">Net account balance</text></g>`;
 
-  root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Equity curve chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${yGrid}<path d="${path}" fill="none" stroke="#d9dde4" stroke-width="2.5"/>${dots}${xTicks}</svg>`;
+  root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Gross trading equity and net account balance chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${legend}${yGrid}<path d="${toSvgPath(grossRows)}" fill="none" stroke="#d9dde4" stroke-width="2.5"/><path d="${toSvgPath(balanceRows)}" fill="none" stroke="#7be0ad" stroke-width="2.5" stroke-dasharray="7 5"/>${grossDots}${balanceDots}${xTicks}</svg>`;
 }
 
 function renderOverview() {
   const m = metrics();
   const cards = [
-    ["Net P/L", `$${m.net.toFixed(2)}`, m.net >= 0],
+    ["Gross profit before payouts", formatCurrency(m.grossProfitBeforePayouts), m.grossProfitBeforePayouts >= 0],
+    ["Gross trading equity", formatCurrency(m.grossTradingEquity), m.grossTradingEquity >= m.startingBalance],
+    ["Current balance after payouts", formatCurrency(m.netAccountBalance), m.netAccountBalance >= m.startingBalance],
+    ["Total payouts", formatCurrency(m.totalPayouts), m.totalPayouts === 0 || m.totalPayouts <= Math.max(m.grossTradingEquity, 0)],
+    ["Deposits / refunds", formatCurrency(m.totalRefunds), m.totalRefunds >= 0],
+    ["Payouts vs profits", m.payoutsAsPctOfProfits === null ? "—" : `${m.payoutsAsPctOfProfits.toFixed(1)}%`, m.payoutsAsPctOfProfits === null || m.payoutsAsPctOfProfits <= 100],
+    ["Payouts vs balance", m.payoutsAsPctOfBalance === null ? "—" : `${m.payoutsAsPctOfBalance.toFixed(1)}%`, m.payoutsAsPctOfBalance === null || m.payoutsAsPctOfBalance <= 100],
     ["Sessions", `${m.sessions}`, true],
     ["Trades", `${m.trades}`, true],
     ["Win Rate", `${m.winRate.toFixed(1)}%`, m.winRate >= 50],
@@ -1429,7 +1541,10 @@ function renderAccounts() {
     } else {
       list.innerHTML = state.accounts.length
         ? state.accounts
-            .map((account) => `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="success" data-pass-account="${account.id}">Pass</button> <button type="button" class="danger" data-blowup-account="${account.id}">Blow Up</button> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Firm: ${escapeHtml(account.propFirm || "—")}</p><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p></article>`)
+            .map((account) => {
+              const summary = getTradingPerformanceSummary(account.id);
+              return `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="success" data-pass-account="${account.id}">Pass</button> <button type="button" class="danger" data-blowup-account="${account.id}">Blow Up</button> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Firm: ${escapeHtml(account.propFirm || "—")}</p><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p><p class="muted small">Gross trading equity: ${formatCurrency(summary.grossTradingEquity)} · Balance after payouts: ${formatCurrency(summary.netAccountBalance)}</p><p class="muted small">Gross profit: ${formatCurrency(summary.grossProfitBeforePayouts)} · Payouts: ${formatCurrency(summary.totalPayouts)}</p></article>`;
+            })
             .join("")
         : '<div class="muted small">No active accounts yet.</div>';
     }
@@ -1443,7 +1558,10 @@ function renderAccounts() {
           : '<div class="muted small">No past groups yet.</div>')
       : (state.groups.length
           ? state.groups
-              .map((group) => `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-blowup-group="${group.id}">Blow Up</button> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Click to view/edit members.</p></article>`)
+              .map((group) => {
+                const summary = getTradingPerformanceSummary(group.id);
+                return `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-blowup-group="${group.id}">Blow Up</button> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Gross trading equity: ${formatCurrency(summary.grossTradingEquity)} · Balance after payouts: ${formatCurrency(summary.netAccountBalance)}</p><p class="muted small">Gross profit: ${formatCurrency(summary.grossProfitBeforePayouts)} · Payouts: ${formatCurrency(summary.totalPayouts)}</p></article>`;
+              })
               .join("")
           : '<div class="muted small">No current groups yet.</div>');
   }
@@ -2853,7 +2971,8 @@ function openAccountEntityModal(type, id) {
     const account = state.accounts.find((a) => a.id === id);
     if (!account) return;
     title.textContent = account.name;
-    body.innerHTML = `<label>Title<input id="entityAccountNameInput" value="${escapeHtml(account.name)}" /></label><label>Starting equity<input id="entityAccountStartInput" type="number" min="0" step="100" value="${account.startingBalance}" /></label><label>Max drawdown<input id="entityAccountMaxDdInput" type="number" min="0" step="100" value="${account.maxDrawdown || 0}" /></label><label>Group<select id="entityAccountGroupSelect"><option value="">No group</option>${state.groups.map((g) => `<option value="${g.id}" ${account.groupId === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`).join("")}</select></label><p class="muted small">Current equity: $${formatWithThousands(getAccountCurrentEquity(account.id), 0)}</p>`;
+    const summary = getAccountFinancialSummary(account.id);
+    body.innerHTML = `<label>Title<input id="entityAccountNameInput" value="${escapeHtml(account.name)}" /></label><label>Starting equity<input id="entityAccountStartInput" type="number" min="0" step="100" value="${account.startingBalance}" /></label><label>Max drawdown<input id="entityAccountMaxDdInput" type="number" min="0" step="100" value="${account.maxDrawdown || 0}" /></label><label>Group<select id="entityAccountGroupSelect"><option value="">No group</option>${state.groups.map((g) => `<option value="${g.id}" ${account.groupId === g.id ? "selected" : ""}>${escapeHtml(g.name)}</option>`).join("")}</select></label><p class="muted small">Gross trading equity: ${formatCurrency(summary.grossTradingEquity)}</p><p class="muted small">Current balance after payouts: ${formatCurrency(summary.netAccountBalance)}</p><p class="muted small">Gross profit before payouts: ${formatCurrency(summary.grossProfitBeforePayouts)} · Total payouts: ${formatCurrency(summary.totalPayouts)}</p>`;
     actions.innerHTML = `<button type="button" id="saveEntityAccountBtn">Save</button><button type="button" class="danger" id="removeEntityAccountBtn">Remove</button>`;
     document.getElementById("saveEntityAccountBtn").onclick = () => {
       const previousGroupId = account.groupId;
@@ -2878,8 +2997,9 @@ function openAccountEntityModal(type, id) {
     if (!group) return;
     const isArchived = Boolean(group.archivedAt);
     const members = getGroupMemberCards(group);
+    const summary = getTradingPerformanceSummary(group.id);
     title.textContent = group.name;
-    body.innerHTML = `<p><strong>Status:</strong> ${isArchived ? "Inactive" : "Active"}</p><p><strong>Accounts:</strong> ${getGroupDisplayAccountCount(group.id)}</p><p><strong>Age range:</strong> ${escapeHtml(formatLifeRange(group.createdAt, group.archivedAt))}</p><div class="group-member-cards">${members.length
+    body.innerHTML = `<p><strong>Status:</strong> ${isArchived ? "Inactive" : "Active"}</p><p><strong>Accounts:</strong> ${getGroupDisplayAccountCount(group.id)}</p><p><strong>Age range:</strong> ${escapeHtml(formatLifeRange(group.createdAt, group.archivedAt))}</p><p><strong>Gross trading equity:</strong> ${formatCurrency(summary.grossTradingEquity)}</p><p><strong>Current balance after payouts:</strong> ${formatCurrency(summary.netAccountBalance)}</p><p><strong>Gross profit before payouts:</strong> ${formatCurrency(summary.grossProfitBeforePayouts)}</p><p><strong>Total payouts:</strong> ${formatCurrency(summary.totalPayouts)}</p><div class="group-member-cards">${members.length
       ? members.map((member) => `<article class="account-thin-card"><span class="account-line"><strong>${escapeHtml(member.name)}</strong> · $${formatWithThousands(member.startingBalance, 0)} · Max DD $${formatWithThousands(member.maxDrawdown || 0, 0)} · ${escapeHtml(member.propFirm || "Custom")} ${member.isActive ? "· active" : "· inactive"}</span></article>`).join("")
       : '<p class="muted small">No account snapshots found.</p>'}</div>`;
     actions.innerHTML = `${isArchived ? "" : `<button type="button" id="editEntityGroupBtn">Edit Members</button>`}<button type="button" class="danger" id="removeEntityGroupBtn">Remove</button>`;
