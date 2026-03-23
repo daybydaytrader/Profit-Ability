@@ -23,6 +23,7 @@ const POINT_VALUE_BY_SYMBOL = {
 };
 const PAYOUT_TYPE_OPTIONS = ["profit withdrawal", "refund", "fee", "tax reserve", "profit split"];
 const PAYOUT_STATUS_OPTIONS = ["planned", "pending", "processing", "completed", "canceled"];
+const PAYOUT_DESTINATION_OPTIONS = ["Wallet", "Wise"];
 
 const seed = {
   accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE, createdAt: new Date().toISOString().slice(0, 10), propFirm: "" }],
@@ -82,6 +83,11 @@ function normalizePayoutType(value) {
   return PAYOUT_TYPE_OPTIONS.includes(normalized) ? normalized : PAYOUT_TYPE_OPTIONS[0];
 }
 
+function normalizePayoutDestination(value) {
+  const normalized = String(value || "").trim();
+  return PAYOUT_DESTINATION_OPTIONS.includes(normalized) ? normalized : "";
+}
+
 function normalizePayout(payout) {
   return {
     id: payout?.id || `po${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
@@ -89,7 +95,7 @@ function normalizePayout(payout) {
     date: normalizeIsoDate(payout?.date, todayIso()),
     amount: toNum(payout?.amount),
     type: normalizePayoutType(payout?.type),
-    destination: String(payout?.destination || "").trim(),
+    destination: normalizePayoutDestination(payout?.destination),
     reason: String(payout?.reason || "").trim(),
     profitPeriodStart: normalizeIsoDate(payout?.profitPeriodStart),
     profitPeriodEnd: normalizeIsoDate(payout?.profitPeriodEnd),
@@ -1547,6 +1553,12 @@ function payoutStatusOptions(selected = "all", includeAll = false) {
   return `${includeAll ? `<option value="all" ${selected === "all" ? "selected" : ""}>All statuses</option>` : ""}${options.join("")}`;
 }
 
+function payoutDestinationOptions(selected = "") {
+  const placeholder = `<option value="" ${selected ? "" : "selected"}>Select destination</option>`;
+  const options = PAYOUT_DESTINATION_OPTIONS.map((destination) => `<option value="${escapeHtml(destination)}" ${selected === destination ? "selected" : ""}>${escapeHtml(destination)}</option>`);
+  return `${placeholder}${options.join("")}`;
+}
+
 function getAnalysisSetupOptions() {
   return [...new Set(state.sessions
     .flatMap((session) => session.trades.map((trade) => String(trade.setup || "").trim()))
@@ -2627,7 +2639,7 @@ function renderPayoutRows(payouts) {
       <td><select data-payout-k="accountId" data-payout-id="${payout.id}">${targetOptionsWithLegacy(payout.accountId)}</select></td>
       <td><input type="number" step="0.01" data-payout-k="amount" data-payout-id="${payout.id}" value="${Number(payout.amount || 0)}" /></td>
       <td><select data-payout-k="type" data-payout-id="${payout.id}">${payoutTypeOptions(payout.type)}</select></td>
-      <td><input type="text" data-payout-k="destination" data-payout-id="${payout.id}" value="${escapeHtml(payout.destination || "")}" placeholder="Bank / wallet / reserve" /></td>
+      <td><select data-payout-k="destination" data-payout-id="${payout.id}">${payoutDestinationOptions(payout.destination)}</select></td>
       <td><input type="text" data-payout-k="reason" data-payout-id="${payout.id}" value="${escapeHtml(payout.reason || "")}" placeholder="Reason" /></td>
       <td><input type="date" data-payout-k="profitPeriodStart" data-payout-id="${payout.id}" value="${escapeHtml(payout.profitPeriodStart || "")}" /></td>
       <td><input type="date" data-payout-k="profitPeriodEnd" data-payout-id="${payout.id}" value="${escapeHtml(payout.profitPeriodEnd || "")}" /></td>
@@ -4161,6 +4173,7 @@ function updatePayoutField(target) {
   else if (["date", "profitPeriodStart", "profitPeriodEnd"].includes(key)) payout[key] = normalizeIsoDate(target.value);
   else if (key === "type") payout[key] = normalizePayoutType(target.value);
   else if (key === "status") payout[key] = normalizePayoutStatus(target.value);
+  else if (key === "destination") payout[key] = normalizePayoutDestination(target.value);
   else payout[key] = String(target.value || "").trim();
   return payout;
 }
