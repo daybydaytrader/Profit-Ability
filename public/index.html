@@ -71,7 +71,16 @@
             <div id="overviewCalendarGrid" class="calendar-grid" role="grid" aria-label="Trading calendar"></div>
           </div>
           <div class="panel">
-            <h3>Equity Curve</h3>
+            <div class="equity-panel-head">
+              <div>
+                <h3>Equity Curve</h3>
+                <p class="muted">Compare pure trading equity against balance after completed payouts without leaving Overview.</p>
+              </div>
+              <label class="equity-toggle">
+                <input id="equityBalanceToggle" type="checkbox" checked />
+                <span>Show balance after payouts</span>
+              </label>
+            </div>
             <div class="chart-filters">
               <label>Account
                 <select id="equityAccountFilter"></select>
@@ -84,6 +93,8 @@
               </label>
             </div>
             <div id="equityChart" class="equity-chart"></div>
+            <div id="equityChartMeta" class="equity-chart-meta"></div>
+            <div id="equityPayoutEvents" class="equity-payout-events"></div>
           </div>
           <div class="grid2">
             <div class="panel">

@@ -168,6 +168,7 @@ const uiState = {
     overviewAccountId: "all",
     overviewFrom: "",
     overviewTo: "",
+    overviewShowBalanceAfterPayouts: true,
     payoutAccountId: "all",
     payoutFrom: "",
     payoutTo: "",
@@ -1270,10 +1271,13 @@ function renderOverviewCalendar() {
 
 function drawEquity() {
   const root = document.getElementById("equityChart");
+  const meta = document.getElementById("equityChartMeta");
+  const payoutEvents = document.getElementById("equityPayoutEvents");
   if (!root) return;
   const selectedId = uiState.filters.overviewAccountId;
   const from = uiState.filters.overviewFrom;
   const to = uiState.filters.overviewTo;
+  const showBalanceAfterPayouts = uiState.filters.overviewShowBalanceAfterPayouts !== false;
   const sessions = getFilteredSessions({
     accountId: selectedId,
     from,
@@ -1304,8 +1308,10 @@ function drawEquity() {
 
   const eventDates = [...new Set([...sessionNetByDate.keys(), ...payoutDeltaByDate.keys()])].sort((a, b) => a.localeCompare(b));
   const startingBalance = getStartingBalanceForTarget(selectedId);
+  const labels = ["Start", ...eventDates];
   const grossPoints = [startingBalance];
   const balancePoints = [startingBalance];
+  const balanceAfterDate = new Map();
   let runningGross = startingBalance;
   let runningBalance = startingBalance;
   eventDates.forEach((date) => {
@@ -1313,9 +1319,17 @@ function drawEquity() {
     runningBalance += (sessionNetByDate.get(date) || 0) + (payoutDeltaByDate.get(date) || 0);
     grossPoints.push(runningGross);
     balancePoints.push(runningBalance);
+    balanceAfterDate.set(date, runningBalance);
   });
-  const labels = ["Start", ...eventDates];
-  const values = [...grossPoints, ...balancePoints];
+
+  if (!eventDates.length) {
+    root.innerHTML = '<div class="payout-chart-empty">Add trades or completed payouts in the selected range to draw the equity curve.</div>';
+    if (meta) meta.innerHTML = '<p class="muted small">Trading Equity reflects session performance before withdrawals, while Balance After Payouts applies completed payout activity on top.</p>';
+    if (payoutEvents) payoutEvents.innerHTML = '<p class="muted small">No completed payout events match the current Overview filters.</p>';
+    return;
+  }
+
+  const values = showBalanceAfterPayouts ? [...grossPoints, ...balancePoints] : [...grossPoints];
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = Math.max(1, max - min);
@@ -1332,10 +1346,11 @@ function drawEquity() {
   const toPointRows = (series) => series.map((value, index) => {
     const x = left + (index * chartW) / Math.max(series.length - 1, 1);
     const y = top + ((max - value) / range) * chartH;
-    return { x, y, value };
+    return { x, y, value, label: labels[index] };
   });
   const grossRows = toPointRows(grossPoints);
   const balanceRows = toPointRows(balancePoints);
+  const rowByDate = new Map(balanceRows.filter((point) => point.label !== "Start").map((point) => [point.label, point]));
   const toSvgPath = (rows) => rows.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
 
   const yGrid = Array.from({ length: 4 }, (_, i) => {
@@ -1344,12 +1359,55 @@ function drawEquity() {
     return `<line x1="${left}" y1="${y}" x2="${w - right}" y2="${y}" stroke="rgba(217,221,228,0.22)"/><text x="${left - 8}" y="${y + 4}" text-anchor="end" fill="#b6bbc6" font-size="11">$${Math.round(val).toLocaleString()}</text>`;
   }).join("");
 
-  const xTicks = grossRows.map((point, index) => `<text x="${point.x}" y="${h - 12}" text-anchor="middle" fill="#b6bbc6" font-size="10">${labels[index] === "Start" ? "Start" : labels[index].slice(5)}</text>`).join("");
+  const tickIndexes = [...new Set(Array.from({ length: Math.min(labels.length, 6) }, (_, index) => Math.round((index * Math.max(labels.length - 1, 0)) / Math.max(Math.min(labels.length, 6) - 1, 1))))];
+  const xTicks = tickIndexes.map((index) => {
+    const point = grossRows[index];
+    if (!point) return "";
+    return `<text x="${point.x}" y="${h - 12}" text-anchor="middle" fill="#b6bbc6" font-size="10">${labels[index] === "Start" ? "Start" : labels[index].slice(5)}</text>`;
+  }).join("");
   const grossDots = grossRows.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" fill="#d9dde4"/>`).join("");
-  const balanceDots = balanceRows.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" fill="#7be0ad"/>`).join("");
-  const legend = `<g><rect x="${left}" y="8" width="12" height="3" rx="1.5" fill="#d9dde4"/><text x="${left + 18}" y="12" fill="#b6bbc6" font-size="11">Gross trading equity</text><rect x="${left + 160}" y="8" width="12" height="3" rx="1.5" fill="#7be0ad"/><text x="${left + 178}" y="12" fill="#b6bbc6" font-size="11">Net account balance</text></g>`;
+  const balanceDots = showBalanceAfterPayouts ? balanceRows.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" fill="#7be0ad"/>`).join("") : "";
 
-  root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Gross trading equity and net account balance chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${legend}${yGrid}<path d="${toSvgPath(grossRows)}" fill="none" stroke="#d9dde4" stroke-width="2.5"/><path d="${toSvgPath(balanceRows)}" fill="none" stroke="#7be0ad" stroke-width="2.5" stroke-dasharray="7 5"/>${grossDots}${balanceDots}${xTicks}</svg>`;
+  const legendItems = [
+    { color: "#d9dde4", label: "Trading Equity", note: "Trade PnL before payouts" },
+    ...(showBalanceAfterPayouts ? [{ color: "#7be0ad", label: "Balance After Payouts", note: "Completed payout activity applied" }] : []),
+    ...(payouts.length ? [{ color: "#8d7dff", label: "Payout Events", note: `${payouts.length} completed marker${payouts.length === 1 ? "" : "s"}` }] : []),
+  ];
+  const legend = legendItems.map((item, index) => `<g><rect x="${left + index * 220}" y="8" width="12" height="3" rx="1.5" fill="${item.color}"/><text x="${left + 18 + index * 220}" y="12" fill="#b6bbc6" font-size="11">${escapeHtml(item.label)}</text><text x="${left + 18 + index * 220}" y="24" fill="rgba(182,187,198,0.78)" font-size="9">${escapeHtml(item.note)}</text></g>`).join("");
+
+  const payoutMarkers = payouts.map((payout, payoutIndex) => {
+    const point = rowByDate.get(payout.date);
+    if (!point) return "";
+    const sameDateIndex = payouts.slice(0, payoutIndex).filter((item) => item.date === payout.date).length;
+    const markerY = Math.max(top + 18, point.y - 16 - sameDateIndex * 16);
+    const diamond = `${point.x},${markerY - 6} ${point.x + 6},${markerY} ${point.x},${markerY + 6} ${point.x - 6},${markerY}`;
+    const tooltip = [
+      formatDateDisplay(payout.date),
+      `${isPayoutRefundLike(payout) ? "Refund" : "Payout"}: ${formatCurrency(Math.abs(toNum(payout.amount)))}`,
+      `Account / Group: ${accountTargetLabel(payout.accountId)}`,
+      `Type: ${payout.type}`,
+    ].join(" • ");
+    return `<g class="equity-payout-marker"><line x1="${point.x}" y1="${top + 26}" x2="${point.x}" y2="${point.y}" stroke="rgba(141,125,255,0.38)" stroke-dasharray="4 4"/><circle cx="${point.x}" cy="${point.y}" r="5" fill="#151922" stroke="#8d7dff" stroke-width="2"/><polygon points="${diamond}" fill="#8d7dff" stroke="#efeaff" stroke-width="1"/><title>${escapeHtml(tooltip)}</title></g>`;
+  }).join("");
+
+  root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Trading equity, balance after payouts, and payout event markers chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${legend}${yGrid}<path d="${toSvgPath(grossRows)}" fill="none" stroke="#d9dde4" stroke-width="2.5"/>${showBalanceAfterPayouts ? `<path d="${toSvgPath(balanceRows)}" fill="none" stroke="#7be0ad" stroke-width="2.5" stroke-dasharray="7 5"/>` : ""}${payoutMarkers}${grossDots}${balanceDots}${xTicks}</svg>`;
+
+  if (meta) {
+    meta.innerHTML = [
+      '<span><strong>Trading Equity</strong><em>Session PnL before withdrawals, refunds, and fees.</em></span>',
+      `<span><strong>Balance After Payouts</strong><em>${showBalanceAfterPayouts ? "Visible as the green dashed line with completed payout flow applied." : "Hidden via toggle, but still reflected in payout event cards below."}</em></span>`,
+    ].join("");
+  }
+
+  if (payoutEvents) {
+    payoutEvents.innerHTML = payouts.length
+      ? payouts.map((payout) => {
+        const signedDelta = isPayoutRefundLike(payout) ? getPayoutAbsoluteAmount(payout) : -getPayoutAbsoluteAmount(payout);
+        const balanceAfter = balanceAfterDate.get(payout.date);
+        return `<article class="equity-payout-event-card"><div class="equity-payout-event-top"><span class="pill payout-pill payout-pill--soft">${escapeHtml(formatDateDisplay(payout.date))}</span><span class="equity-payout-amount ${signedDelta >= 0 ? "good" : "bad"}">${signedDelta >= 0 ? "+" : "-"}${escapeHtml(formatCurrency(Math.abs(signedDelta)).replace(/^-/, ""))}</span></div><strong>${escapeHtml(accountTargetLabel(payout.accountId))}</strong><p class="muted small">${escapeHtml(payout.type)} · ${escapeHtml(isPayoutRefundLike(payout) ? "Refund / credit" : "Withdrawal / deduction")}</p><p class="muted small">Balance after event: ${escapeHtml(balanceAfter === undefined ? "—" : formatCurrency(balanceAfter))}</p></article>`;
+      }).join("")
+      : '<p class="muted small">No completed payout events match the current Overview filters.</p>';
+  }
 }
 
 function renderOverview() {
@@ -1486,9 +1544,11 @@ function renderFilterSelects() {
   const payout = document.getElementById("payoutAccountFilter");
   const payoutType = document.getElementById("payoutTypeFilter");
   const payoutStatus = document.getElementById("payoutStatusFilter");
+  const equityToggle = document.getElementById("equityBalanceToggle");
   const journal = document.getElementById("journalAccountFilter");
   const analysis = document.getElementById("analysisAccountFilter");
   if (equity) { equity.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.overviewAccountId)}`; equity.value = uiState.filters.overviewAccountId; }
+  if (equityToggle) equityToggle.checked = uiState.filters.overviewShowBalanceAfterPayouts !== false;
   if (payout) { payout.innerHTML = `<option value="all">All accounts</option>${accountOptions(uiState.filters.payoutAccountId)}`; payout.value = uiState.filters.payoutAccountId; }
   if (payoutType) payoutType.innerHTML = payoutTypeOptions(uiState.filters.payoutType, true);
   if (payoutStatus) payoutStatus.innerHTML = payoutStatusOptions(uiState.filters.payoutStatus, true);
@@ -4050,6 +4110,11 @@ wireGroupBuilderDnD(document.getElementById("groupBuilderSelected"), true);
     if (key === "analysisPreset" && e.target.value !== "custom") syncAnalysisDateRangeFromPreset();
     renderAnalysis();
   });
+});
+
+document.getElementById("equityBalanceToggle")?.addEventListener("change", (e) => {
+  uiState.filters.overviewShowBalanceAfterPayouts = Boolean(e.target.checked);
+  drawEquity();
 });
 
 document.getElementById("analysisResetFiltersBtn")?.addEventListener("click", () => {
