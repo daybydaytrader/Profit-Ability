@@ -449,11 +449,88 @@ button.danger {
 .payout-filter-controls {
   margin: 0;
 }
+.payout-review-grid,
 .payouts-analytics-grid {
   align-items: stretch;
 }
+.payout-review-card,
+.payout-breakdown-card,
 .payout-chart-card {
   min-height: 100%;
+}
+.payout-review-summary {
+  display: grid;
+  gap: 16px;
+}
+.payout-review-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.payout-review-metric {
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 6px;
+}
+.payout-review-metric .eyebrow,
+.payout-breakdown-panel .eyebrow {
+  margin: 0;
+}
+.payout-review-metric .value,
+.payout-breakdown-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #f4f1ff;
+}
+.payout-review-metric p,
+.payout-review-note,
+.payout-breakdown-panel p {
+  margin: 0;
+}
+.payout-review-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.payout-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.payout-breakdown-panel {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+.payout-breakdown-list {
+  display: grid;
+  gap: 10px;
+}
+.payout-breakdown-item {
+  display: grid;
+  gap: 4px;
+}
+.payout-breakdown-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.payout-breakdown-row strong {
+  color: #f4f1ff;
+}
+.payout-breakdown-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.payout-breakdown-empty {
+  color: var(--muted);
+  margin: 0;
 }
 .payout-chart-card--wide {
   grid-column: 1 / -1;

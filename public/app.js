@@ -1998,6 +1998,134 @@ function getPayoutChartRangeLabel({ from = "", to = "" }, fallbackPayouts = []) 
   return formatDateDisplay(start || end);
 }
 
+function formatBucketLabel(bucketKey, bucketType = "month") {
+  if (!bucketKey) return "—";
+  if (bucketType === "month") {
+    const [year, month] = String(bucketKey).split("-");
+    const monthIndex = Number(month) - 1;
+    if (!year || monthIndex < 0 || monthIndex > 11) return bucketKey;
+    return `${MONTH_LABELS[monthIndex].slice(0, 3)} ${year}`;
+  }
+  if (bucketType === "week") {
+    return `Week of ${formatDateDisplay(bucketKey)}`;
+  }
+  return bucketKey;
+}
+
+function summarizePayoutBreakdown(payouts, getLabel, { emptyLabel = "Unspecified" } = {}) {
+  const map = new Map();
+  payouts.forEach((payout) => {
+    const label = String(getLabel(payout) || "").trim() || emptyLabel;
+    const current = map.get(label) || {
+      label,
+      records: 0,
+      completedRecords: 0,
+      totalAmount: 0,
+      outflowAmount: 0,
+      inflowAmount: 0,
+    };
+    const amount = getPayoutAbsoluteAmount(payout);
+    current.records += 1;
+    if (isCompletedPayout(payout)) current.completedRecords += 1;
+    current.totalAmount += amount;
+    if (isPayoutRefundLike(payout)) current.inflowAmount += amount;
+    else current.outflowAmount += amount;
+    map.set(label, current);
+  });
+  return [...map.values()].sort((a, b) => b.totalAmount - a.totalAmount || b.records - a.records || a.label.localeCompare(b.label));
+}
+
+function summarizeAveragePayoutSizeByBucket(payouts, bucketType = "month") {
+  const map = new Map();
+  payouts.forEach((payout) => {
+    const key = bucketType === "week" ? getWeeklyBucketStart(payout.date) : String(payout.date || "").slice(0, 7);
+    if (!key) return;
+    const current = map.get(key) || { key, label: formatBucketLabel(key, bucketType), records: 0, totalAmount: 0 };
+    current.records += 1;
+    current.totalAmount += getPayoutAbsoluteAmount(payout);
+    map.set(key, current);
+  });
+  return [...map.values()]
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map((entry) => ({
+      ...entry,
+      averageAmount: entry.records ? entry.totalAmount / entry.records : 0,
+    }));
+}
+
+function summarizeProfitablePeriodPayoutCoverage(sessions, payouts, bucketType = "week", targetId = "all") {
+  const profitByBucket = new Map();
+  sessions.forEach((session) => {
+    const bucketKey = bucketType === "week" ? getWeeklyBucketStart(session.date) : String(session.date || "").slice(0, 7);
+    if (!bucketKey) return;
+    profitByBucket.set(bucketKey, (profitByBucket.get(bucketKey) || 0) + getSessionNetForFilter(session, targetId));
+  });
+  const payoutCountByBucket = new Map();
+  payouts.forEach((payout) => {
+    const bucketKey = bucketType === "week" ? getWeeklyBucketStart(payout.date) : String(payout.date || "").slice(0, 7);
+    if (!bucketKey) return;
+    payoutCountByBucket.set(bucketKey, (payoutCountByBucket.get(bucketKey) || 0) + 1);
+  });
+  const profitableBuckets = [...profitByBucket.entries()]
+    .filter(([, net]) => net > 0)
+    .map(([key, net]) => ({
+      key,
+      label: formatBucketLabel(key, bucketType),
+      net,
+      payoutCount: payoutCountByBucket.get(key) || 0,
+    }));
+  const profitableWithPayout = profitableBuckets.filter((entry) => entry.payoutCount > 0);
+  return {
+    profitableCount: profitableBuckets.length,
+    withPayoutCount: profitableWithPayout.length,
+    percentage: profitableBuckets.length ? (profitableWithPayout.length / profitableBuckets.length) * 100 : null,
+    rows: profitableBuckets,
+  };
+}
+
+function summarizePayoutPerformanceWindows(payouts, sessions, targetId = "all", windowSize = 5) {
+  const sessionRows = sessions
+    .map((session) => ({ session, net: getSessionNetForFilter(session, targetId) }))
+    .sort((a, b) => String(a.session.date || "").localeCompare(String(b.session.date || "")));
+  const windows = payouts.map((payout) => {
+    const before = sessionRows.filter((row) => row.session.date < payout.date).slice(-windowSize);
+    const after = sessionRows.filter((row) => row.session.date > payout.date).slice(0, windowSize);
+    if (!before.length && !after.length) return null;
+    const beforeNet = before.reduce((sum, row) => sum + row.net, 0);
+    const afterNet = after.reduce((sum, row) => sum + row.net, 0);
+    return {
+      payout,
+      beforeCount: before.length,
+      afterCount: after.length,
+      beforeNet,
+      afterNet,
+      beforeAverage: before.length ? beforeNet / before.length : null,
+      afterAverage: after.length ? afterNet / after.length : null,
+      beforeWins: before.filter((row) => row.net > 0).length,
+      afterWins: after.filter((row) => row.net > 0).length,
+    };
+  }).filter(Boolean);
+
+  const comparable = windows.filter((window) => window.beforeCount && window.afterCount);
+  const beforeSessionCount = comparable.reduce((sum, window) => sum + window.beforeCount, 0);
+  const afterSessionCount = comparable.reduce((sum, window) => sum + window.afterCount, 0);
+  const beforeNet = comparable.reduce((sum, window) => sum + window.beforeNet, 0);
+  const afterNet = comparable.reduce((sum, window) => sum + window.afterNet, 0);
+  const beforeWins = comparable.reduce((sum, window) => sum + window.beforeWins, 0);
+  const afterWins = comparable.reduce((sum, window) => sum + window.afterWins, 0);
+  return {
+    windowSize,
+    windows,
+    comparableCount: comparable.length,
+    beforeAverageNet: beforeSessionCount ? beforeNet / beforeSessionCount : null,
+    afterAverageNet: afterSessionCount ? afterNet / afterSessionCount : null,
+    beforeWinRate: beforeSessionCount ? (beforeWins / beforeSessionCount) * 100 : null,
+    afterWinRate: afterSessionCount ? (afterWins / afterSessionCount) * 100 : null,
+    improvedCount: comparable.filter((window) => (window.afterAverage || 0) > (window.beforeAverage || 0)).length,
+    worsenedCount: comparable.filter((window) => (window.afterAverage || 0) < (window.beforeAverage || 0)).length,
+  };
+}
+
 function getPayoutAnalytics() {
   const selectedFilters = getCurrentPayoutFilters();
   const lifetimeFilters = getCurrentPayoutFilters({ ignoreDate: true });
@@ -2006,6 +2134,12 @@ function getPayoutAnalytics() {
   const selectedCompletedPayouts = selectedPayouts.filter(isCompletedPayout);
   const lifetimeCompletedPayouts = lifetimePayouts.filter(isCompletedPayout);
   const targetId = uiState.filters.payoutAccountId;
+  const selectedSessions = getFilteredSessions({
+    accountId: targetId,
+    from: selectedFilters.from,
+    to: selectedFilters.to,
+  });
+  const comparisonSessions = getFilteredSessions({ accountId: targetId });
   const selectedTradeEntries = getTradeEntriesForTarget({
     targetId,
     from: selectedFilters.from,
@@ -2040,6 +2174,8 @@ function getPayoutAnalytics() {
     lifetimePayouts,
     selectedCompletedPayouts,
     lifetimeCompletedPayouts,
+    selectedSessions,
+    comparisonSessions,
     selectedTotalAmount,
     lifetimeTotalAmount,
     selectedTradeEntries,
@@ -2057,6 +2193,15 @@ function getPayoutAnalytics() {
     latestLifetimePayout,
     daysSinceLatestPayout,
     rangeLabel: getPayoutChartRangeLabel(selectedFilters, selectedPayouts),
+    byReason: summarizePayoutBreakdown(selectedPayouts, (payout) => payout.reason),
+    byDestination: summarizePayoutBreakdown(selectedPayouts, (payout) => payout.destination),
+    byAccountGroup: summarizePayoutBreakdown(selectedPayouts, (payout) => accountTargetLabel(payout.accountId), { emptyLabel: "Unknown target" }),
+    byRecurrence: summarizePayoutBreakdown(selectedPayouts, (payout) => (payout.isRecurring ? "Recurring" : "Non-recurring")),
+    profitableWeeksWithPayout: summarizeProfitablePeriodPayoutCoverage(selectedSessions, selectedCompletedPayouts, "week", targetId),
+    profitableMonthsWithPayout: summarizeProfitablePeriodPayoutCoverage(selectedSessions, selectedCompletedPayouts, "month", targetId),
+    performanceAroundPayouts: summarizePayoutPerformanceWindows(selectedCompletedPayouts, comparisonSessions, targetId, 5),
+    averageSizeByMonth: summarizeAveragePayoutSizeByBucket(selectedCompletedPayouts, "month"),
+    averageSizeByWeek: summarizeAveragePayoutSizeByBucket(selectedCompletedPayouts, "week"),
   };
 }
 
@@ -2232,6 +2377,115 @@ function renderPayoutTimeline(analytics) {
   container.innerHTML = items.map((item) => `<article class="payout-timeline-item"><div class="payout-timeline-marker"><span class="payout-timeline-dot"></span></div><div class="payout-timeline-content"><div class="payout-timeline-row"><strong>${escapeHtml(item.title)}</strong><span class="pill payout-pill">${escapeHtml(item.value)}</span></div><p>${escapeHtml(item.note)}</p></div></article>`).join("");
 }
 
+function renderBreakdownPanel({ title, note, rows, emptyMessage, valueFormatter = formatCurrency, metaFormatter } = {}) {
+  const limitedRows = (rows || []).slice(0, 6);
+  const content = limitedRows.length
+    ? `<div class="payout-breakdown-list">${limitedRows.map((row) => `<div class="payout-breakdown-item"><div class="payout-breakdown-row"><strong>${escapeHtml(row.label)}</strong><span class="payout-breakdown-value">${escapeHtml(valueFormatter(row.value))}</span></div><div class="payout-breakdown-meta">${escapeHtml(metaFormatter ? metaFormatter(row) : `${row.records || 0} record${row.records === 1 ? "" : "s"}`)}</div></div>`).join("")}</div>`
+    : `<p class="payout-breakdown-empty">${escapeHtml(emptyMessage || "No payout records match this view yet.")}</p>`;
+  return `<section class="payout-breakdown-panel"><div><p class="eyebrow">Breakdown</p><div class="payout-breakdown-row"><strong>${escapeHtml(title || "—")}</strong></div><p class="muted small">${escapeHtml(note || "")}</p></div>${content}</section>`;
+}
+
+function renderPayoutReviewSummary(analytics) {
+  const container = document.getElementById("payoutReviewSummary");
+  if (!container) return;
+  const weeklyCoverage = analytics.profitableWeeksWithPayout;
+  const monthlyCoverage = analytics.profitableMonthsWithPayout;
+  const performance = analytics.performanceAroundPayouts;
+  const completedOutflowCount = analytics.selectedCompletedPayouts.filter((payout) => !isPayoutRefundLike(payout)).length;
+  const metrics = [
+    {
+      label: "Profitable weeks ending with payout",
+      value: weeklyCoverage.percentage === null ? "—" : `${weeklyCoverage.percentage.toFixed(1)}%`,
+      note: weeklyCoverage.profitableCount ? `${weeklyCoverage.withPayoutCount} of ${weeklyCoverage.profitableCount} profitable weeks in the selected range had a completed payout.` : "No profitable weeks matched the current payout filters.",
+    },
+    {
+      label: "Profitable months ending with payout",
+      value: monthlyCoverage.percentage === null ? "—" : `${monthlyCoverage.percentage.toFixed(1)}%`,
+      note: monthlyCoverage.profitableCount ? `${monthlyCoverage.withPayoutCount} of ${monthlyCoverage.profitableCount} profitable months in the selected range had a completed payout.` : "No profitable months matched the current payout filters.",
+    },
+    {
+      label: "Average time between payouts",
+      value: analytics.averageGapDays === null ? "—" : `${analytics.averageGapDays.toFixed(1)} days`,
+      note: analytics.selectedCompletedPayouts.length > 1 ? `Calculated from ${analytics.selectedCompletedPayouts.length} completed payout dates.` : "Need at least two completed payouts in range to measure cadence.",
+    },
+    {
+      label: "Average completed payout size",
+      value: completedOutflowCount ? formatCurrency(analytics.selectedPayoutOutflows / completedOutflowCount) : "—",
+      note: completedOutflowCount ? `Based on ${completedOutflowCount} completed outflow payout record${completedOutflowCount === 1 ? "" : "s"}, using stored payout amounts.` : "No completed withdrawal outflows in the filtered selection yet.",
+    },
+  ];
+  const comparisonNote = performance.comparableCount
+    ? `Using the ${performance.windowSize} trading sessions before and after each completed payout date, ${performance.improvedCount} payout window${performance.improvedCount === 1 ? "" : "s"} improved after the withdrawal while ${performance.worsenedCount} worsened.`
+    : "Need completed payouts plus trading sessions on both sides of the payout date to compare before vs after performance.";
+  const comparisonMetrics = [
+    {
+      label: "Before payout avg/session",
+      value: performance.beforeAverageNet === null ? "—" : formatCurrency(performance.beforeAverageNet),
+      note: performance.beforeWinRate === null ? "No comparable pre-payout sessions yet." : `${performance.beforeWinRate.toFixed(1)}% win rate across sampled sessions.`,
+    },
+    {
+      label: "After payout avg/session",
+      value: performance.afterAverageNet === null ? "—" : formatCurrency(performance.afterAverageNet),
+      note: performance.afterWinRate === null ? "No comparable post-payout sessions yet." : `${performance.afterWinRate.toFixed(1)}% win rate across sampled sessions.`,
+    },
+    {
+      label: "Net shift after payouts",
+      value: performance.beforeAverageNet === null || performance.afterAverageNet === null ? "—" : formatCurrency(performance.afterAverageNet - performance.beforeAverageNet),
+      note: comparisonNote,
+    },
+  ];
+  container.innerHTML = `<div class="payout-review-metrics">${metrics.map((item) => `<article class="payout-review-metric"><p class="eyebrow">${escapeHtml(item.label)}</p><div class="value">${escapeHtml(item.value)}</div><p class="payout-review-note">${escapeHtml(item.note)}</p></article>`).join("")}</div><div class="payout-review-metrics">${comparisonMetrics.map((item) => `<article class="payout-review-metric"><p class="eyebrow">${escapeHtml(item.label)}</p><div class="value">${escapeHtml(item.value)}</div><p class="payout-review-note">${escapeHtml(item.note)}</p></article>`).join("")}</div>`;
+}
+
+function renderPayoutMetadataBreakdowns(analytics) {
+  const container = document.getElementById("payoutMetadataBreakdowns");
+  if (!container) return;
+  container.innerHTML = [
+    renderBreakdownPanel({
+      title: "Payouts by reason",
+      note: "Uses each payout record’s stored reason field.",
+      rows: analytics.byReason.map((row) => ({ ...row, value: row.totalAmount })),
+      emptyMessage: "Add payout reasons to break down withdrawal intent.",
+      metaFormatter: (row) => `${row.records} record${row.records === 1 ? "" : "s"} · ${row.completedRecords} completed`,
+    }),
+    renderBreakdownPanel({
+      title: "Payouts by destination",
+      note: "Based on saved destination metadata such as bank, wallet, or reserve.",
+      rows: analytics.byDestination.map((row) => ({ ...row, value: row.totalAmount })),
+      emptyMessage: "Add payout destinations to see where funds are flowing.",
+      metaFormatter: (row) => `${row.records} record${row.records === 1 ? "" : "s"} · outflows ${formatCurrency(row.outflowAmount)}`,
+    }),
+    renderBreakdownPanel({
+      title: "Payouts by account / group",
+      note: "Rolls up totals from the payout record’s stored accountId target.",
+      rows: analytics.byAccountGroup.map((row) => ({ ...row, value: row.totalAmount })),
+      emptyMessage: "No payout targets match the current filters.",
+      metaFormatter: (row) => `${row.records} record${row.records === 1 ? "" : "s"} · completed ${row.completedRecords}`,
+    }),
+    renderBreakdownPanel({
+      title: "Recurring vs non-recurring",
+      note: "Reads the saved isRecurring flag instead of inferring cadence.",
+      rows: analytics.byRecurrence.map((row) => ({ ...row, value: row.totalAmount })),
+      emptyMessage: "No payout recurrence metadata is available yet.",
+      metaFormatter: (row) => `${row.records} record${row.records === 1 ? "" : "s"} · avg ${formatCurrency(row.records ? row.totalAmount / row.records : 0)}`,
+    }),
+    renderBreakdownPanel({
+      title: "Average payout size by month",
+      note: "Completed payouts grouped by calendar month.",
+      rows: analytics.averageSizeByMonth.map((row) => ({ ...row, value: row.averageAmount })),
+      emptyMessage: "Complete payouts in at least one month to measure monthly average size.",
+      metaFormatter: (row) => `${row.records} payout${row.records === 1 ? "" : "s"} · total ${formatCurrency(row.totalAmount)}`,
+    }),
+    renderBreakdownPanel({
+      title: "Average payout size by week",
+      note: "Completed payouts grouped by actual payout week.",
+      rows: analytics.averageSizeByWeek.map((row) => ({ ...row, value: row.averageAmount })),
+      emptyMessage: "Complete payouts in at least one week to measure weekly average size.",
+      metaFormatter: (row) => `${row.records} payout${row.records === 1 ? "" : "s"} · total ${formatCurrency(row.totalAmount)}`,
+    }),
+  ].join("");
+}
+
 function renderPayoutCharts(analytics) {
   const cumulativePoints = analytics.selectedPayouts
     .slice()
@@ -2357,8 +2611,10 @@ function renderPayoutRows(payouts) {
 
 function renderPayouts() {
   const scorecards = document.getElementById("payoutScorecards");
+  const reviewSummary = document.getElementById("payoutReviewSummary");
+  const metadataBreakdowns = document.getElementById("payoutMetadataBreakdowns");
   const list = document.getElementById("payoutList");
-  if (!scorecards || !list) return;
+  if (!scorecards || !reviewSummary || !metadataBreakdowns || !list) return;
   renderFilterSelects();
   const analytics = getPayoutAnalytics();
   const payouts = analytics.selectedPayouts;
@@ -2382,6 +2638,8 @@ function renderPayouts() {
   ].map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`).join("");
 
   renderPayoutMilestones(analytics);
+  renderPayoutReviewSummary(analytics);
+  renderPayoutMetadataBreakdowns(analytics);
   renderPayoutTimeline(analytics);
   renderPayoutCharts(analytics);
 
