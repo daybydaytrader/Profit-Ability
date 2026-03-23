@@ -1860,6 +1860,418 @@ function getFilteredPayouts({ accountId = "all", from = "", to = "", type = "all
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.id || "").localeCompare(String(a.id || "")));
 }
 
+function getCurrentPayoutFilters({ ignoreDate = false } = {}) {
+  return {
+    accountId: uiState.filters.payoutAccountId,
+    from: ignoreDate ? "" : uiState.filters.payoutFrom,
+    to: ignoreDate ? "" : uiState.filters.payoutTo,
+    type: uiState.filters.payoutType,
+    status: uiState.filters.payoutStatus,
+  };
+}
+
+function getPayoutAbsoluteAmount(payout) {
+  return Math.abs(toNum(payout?.amount));
+}
+
+function getPayoutSignedBalanceDelta(payout) {
+  const amount = getPayoutAbsoluteAmount(payout);
+  return isPayoutRefundLike(payout) ? amount : -amount;
+}
+
+function average(values) {
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function formatDateDisplay(value) {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function daysBetweenIso(start, end) {
+  if (!start || !end) return null;
+  const startDate = new Date(`${start}T00:00:00Z`);
+  const endDate = new Date(`${end}T00:00:00Z`);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  return Math.max(0, Math.round((endDate - startDate) / 86400000));
+}
+
+function getWeeklyBucketStart(isoDate) {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - (day - 1));
+  return date.toISOString().slice(0, 10);
+}
+
+function getTradeEntriesForTarget({ targetId = "all", from = "", to = "" } = {}) {
+  return getFilteredSessions({ accountId: targetId, from, to }).flatMap((session) => session.trades
+    .filter((trade) => {
+      const tradeTargetId = getTradeAccountTargetId(trade, session);
+      if (targetId === "all") return isActiveTargetId(tradeTargetId);
+      return tradeTargetId === targetId;
+    })
+    .map((trade) => ({ session, trade, net: calcTradeNet(trade, session) })));
+}
+
+function getGrossTradingProfit(entries) {
+  return entries.reduce((sum, entry) => sum + Math.max(0, entry.net), 0);
+}
+
+function getFirstTradeDateForTarget(targetId = "all") {
+  const dates = getTradeEntriesForTarget({ targetId })
+    .map(({ session }) => String(session.date || ""))
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return dates[0] || "";
+}
+
+function getPayoutChartRangeLabel({ from = "", to = "" }, fallbackPayouts = []) {
+  const sortedDates = fallbackPayouts.map((payout) => payout.date).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const start = from || sortedDates[0] || "";
+  const end = to || sortedDates.at(-1) || start;
+  if (!start && !end) return "All available dates";
+  if (start && end) return `${formatDateDisplay(start)} → ${formatDateDisplay(end)}`;
+  return formatDateDisplay(start || end);
+}
+
+function getPayoutAnalytics() {
+  const selectedFilters = getCurrentPayoutFilters();
+  const lifetimeFilters = getCurrentPayoutFilters({ ignoreDate: true });
+  const selectedPayouts = getFilteredPayouts(selectedFilters);
+  const lifetimePayouts = getFilteredPayouts(lifetimeFilters);
+  const selectedCompletedPayouts = selectedPayouts.filter(isCompletedPayout);
+  const lifetimeCompletedPayouts = lifetimePayouts.filter(isCompletedPayout);
+  const targetId = uiState.filters.payoutAccountId;
+  const selectedTradeEntries = getTradeEntriesForTarget({
+    targetId,
+    from: selectedFilters.from,
+    to: selectedFilters.to,
+  });
+  const selectedGrossTradingProfit = getGrossTradingProfit(selectedTradeEntries);
+  const selectedPayoutOutflows = selectedCompletedPayouts.reduce((sum, payout) => sum + (isPayoutRefundLike(payout) ? 0 : getPayoutAbsoluteAmount(payout)), 0);
+  const selectedTotalAmount = selectedPayouts.reduce((sum, payout) => sum + getPayoutAbsoluteAmount(payout), 0);
+  const lifetimeTotalAmount = lifetimePayouts.reduce((sum, payout) => sum + getPayoutAbsoluteAmount(payout), 0);
+  const rangeDates = selectedPayouts.map((payout) => payout.date).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const effectiveFrom = selectedFilters.from || rangeDates[0] || "";
+  const effectiveTo = selectedFilters.to || rangeDates.at(-1) || effectiveFrom;
+  const spanDaysRaw = daysBetweenIso(effectiveFrom, effectiveTo);
+  const spanDays = spanDaysRaw === null ? (selectedPayouts.length ? 1 : 0) : Math.max(spanDaysRaw + 1, 1);
+  const averagePerWeek = spanDays ? selectedTotalAmount / Math.max(spanDays / 7, 1 / 7) : null;
+  const averagePerMonth = spanDays ? selectedTotalAmount / Math.max(spanDays / 30.4375, 1 / 30.4375) : null;
+  const largestPayout = [...selectedPayouts].sort((a, b) => getPayoutAbsoluteAmount(b) - getPayoutAbsoluteAmount(a) || String(b.date || "").localeCompare(String(a.date || "")))[0] || null;
+  const completedDatesAsc = selectedCompletedPayouts.map((payout) => payout.date).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  const payoutGaps = completedDatesAsc.slice(1).map((date, index) => daysBetweenIso(completedDatesAsc[index], date)).filter((value) => value !== null);
+  const averageGapDays = average(payoutGaps);
+  const firstTradeDate = getFirstTradeDateForTarget(targetId);
+  const firstLifetimePayoutDate = lifetimeCompletedPayouts.map((payout) => payout.date).filter(Boolean).sort((a, b) => a.localeCompare(b))[0] || "";
+  const daysFromFirstTradeToFirstPayout = firstTradeDate && firstLifetimePayoutDate ? daysBetweenIso(firstTradeDate, firstLifetimePayoutDate) : null;
+  const averageBufferLeft = average(selectedPayouts.map((payout) => toNum(payout.bufferAfterPayout)));
+  const latestLifetimePayout = lifetimePayouts[0] || null;
+  const daysSinceLatestPayout = latestLifetimePayout?.date ? daysBetweenIso(latestLifetimePayout.date, todayIso()) : null;
+
+  return {
+    selectedFilters,
+    lifetimeFilters,
+    selectedPayouts,
+    lifetimePayouts,
+    selectedCompletedPayouts,
+    lifetimeCompletedPayouts,
+    selectedTotalAmount,
+    lifetimeTotalAmount,
+    selectedTradeEntries,
+    selectedGrossTradingProfit,
+    selectedPayoutOutflows,
+    averagePerWeek,
+    averagePerMonth,
+    largestPayout,
+    averageGapDays,
+    firstTradeDate,
+    firstLifetimePayoutDate,
+    daysFromFirstTradeToFirstPayout,
+    payoutRate: selectedGrossTradingProfit > 0 ? (selectedPayoutOutflows / selectedGrossTradingProfit) * 100 : null,
+    averageBufferLeft,
+    latestLifetimePayout,
+    daysSinceLatestPayout,
+    rangeLabel: getPayoutChartRangeLabel(selectedFilters, selectedPayouts),
+  };
+}
+
+function renderChartEmptyState(containerId, message) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = `<div class="payout-chart-empty">${escapeHtml(message)}</div>`;
+}
+
+function renderLineChart(containerId, series, { ariaLabel, yFormatter = formatCurrency, caption = "" } = {}) {
+  const container = document.getElementById(containerId);
+  const normalizedSeries = (series || []).filter((item) => Array.isArray(item?.data) && item.data.length);
+  if (!container) return;
+  if (!normalizedSeries.length) {
+    renderChartEmptyState(containerId, "No data available for this chart yet.");
+    return;
+  }
+  const labels = normalizedSeries[0].data.map((point) => point.label);
+  const values = normalizedSeries.flatMap((item) => item.data.map((point) => point.value));
+  const min = Math.min(...values, 0);
+  const max = Math.max(...values, 0);
+  const range = Math.max(1, max - min);
+  const left = 60;
+  const right = 18;
+  const top = 18;
+  const bottom = 42;
+  const width = 1000;
+  const height = 260;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const tickIndexes = [...new Set(Array.from({ length: Math.min(labels.length, 6) }, (_, index) => Math.round((index * Math.max(labels.length - 1, 0)) / Math.max(Math.min(labels.length, 6) - 1, 1))))];
+  const toRows = (points) => points.map((point, index) => ({
+    ...point,
+    x: left + (index * chartWidth) / Math.max(points.length - 1, 1),
+    y: top + ((max - point.value) / range) * chartHeight,
+  }));
+  const yGrid = Array.from({ length: 4 }, (_, index) => {
+    const y = top + index * (chartHeight / 3);
+    const value = max - (index * range) / 3;
+    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="rgba(217,221,228,0.2)"/><text x="${left - 8}" y="${y + 4}" text-anchor="end" fill="#b6bbc6" font-size="11">${escapeHtml(yFormatter(value))}</text>`;
+  }).join("");
+  const zeroY = top + ((max - 0) / range) * chartHeight;
+  const zeroLine = min < 0 && max > 0 ? `<line x1="${left}" y1="${zeroY}" x2="${width - right}" y2="${zeroY}" stroke="rgba(255,255,255,0.28)" stroke-dasharray="4 4"/>` : "";
+  const xTicks = tickIndexes.map((index) => {
+    const x = left + (index * chartWidth) / Math.max(labels.length - 1, 1);
+    return `<text x="${x}" y="${height - 12}" text-anchor="middle" fill="#b6bbc6" font-size="10">${escapeHtml(labels[index])}</text>`;
+  }).join("");
+  const legend = normalizedSeries.map((item, index) => `<g><rect x="${left + index * 190}" y="8" width="12" height="3" rx="1.5" fill="${item.color}"/><text x="${left + 18 + index * 190}" y="12" fill="#b6bbc6" font-size="11">${escapeHtml(item.name)}</text></g>`).join("");
+  const lines = normalizedSeries.map((item) => {
+    const rows = toRows(item.data);
+    const path = rows.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
+    const dots = rows.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="3" fill="${item.color}"/>`).join("");
+    return `<path d="${path}" fill="none" stroke="${item.color}" stroke-width="2.5" ${item.dash ? `stroke-dasharray="${item.dash}"` : ""}/>${dots}`;
+  }).join("");
+  container.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(ariaLabel || 'Line chart')}"><rect x="0" y="0" width="${width}" height="${height}" fill="transparent"/>${legend}${yGrid}${zeroLine}${lines}${xTicks}</svg>${caption ? `<p class="payout-chart-caption">${escapeHtml(caption)}</p>` : ""}`;
+}
+
+function renderBarChart(containerId, categories, seriesConfig, { ariaLabel, yFormatter = formatCurrency, caption = "" } = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  if (!categories.length || !seriesConfig.length) {
+    renderChartEmptyState(containerId, "No data available for this chart yet.");
+    return;
+  }
+  const values = categories.flatMap((category) => seriesConfig.map((series) => Number(category[series.key] || 0)));
+  const min = Math.min(...values, 0);
+  const max = Math.max(...values, 0);
+  const range = Math.max(1, max - min);
+  const left = 60;
+  const right = 18;
+  const top = 18;
+  const bottom = 48;
+  const width = 1000;
+  const height = 260;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const bandWidth = chartWidth / Math.max(categories.length, 1);
+  const zeroY = top + ((max - 0) / range) * chartHeight;
+  const yGrid = Array.from({ length: 4 }, (_, index) => {
+    const y = top + index * (chartHeight / 3);
+    const value = max - (index * range) / 3;
+    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" stroke="rgba(217,221,228,0.2)"/><text x="${left - 8}" y="${y + 4}" text-anchor="end" fill="#b6bbc6" font-size="11">${escapeHtml(yFormatter(value))}</text>`;
+  }).join("");
+  const groupWidth = bandWidth * 0.72;
+  const barWidth = groupWidth / Math.max(seriesConfig.length, 1);
+  const bars = categories.map((category, categoryIndex) => seriesConfig.map((series, seriesIndex) => {
+    const value = Number(category[series.key] || 0);
+    const x = left + categoryIndex * bandWidth + (bandWidth - groupWidth) / 2 + seriesIndex * barWidth;
+    const y = top + ((max - Math.max(value, 0)) / range) * chartHeight;
+    const barHeight = Math.abs(value / range) * chartHeight;
+    const rectY = value >= 0 ? y : zeroY;
+    return `<rect x="${x.toFixed(2)}" y="${rectY.toFixed(2)}" width="${Math.max(barWidth - 6, 8).toFixed(2)}" height="${Math.max(barHeight, 0).toFixed(2)}" rx="6" fill="${series.color}" opacity="0.95"/>`;
+  }).join("")).join("");
+  const xTicks = categories.map((category, index) => {
+    const x = left + index * bandWidth + bandWidth / 2;
+    return `<text x="${x.toFixed(2)}" y="${height - 14}" text-anchor="middle" fill="#b6bbc6" font-size="10">${escapeHtml(category.label)}</text>`;
+  }).join("");
+  const legend = seriesConfig.map((series, index) => `<g><rect x="${left + index * 170}" y="8" width="12" height="3" rx="1.5" fill="${series.color}"/><text x="${left + 18 + index * 170}" y="12" fill="#b6bbc6" font-size="11">${escapeHtml(series.name)}</text></g>`).join("");
+  container.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(ariaLabel || 'Bar chart')}"><rect x="0" y="0" width="${width}" height="${height}" fill="transparent"/>${legend}${yGrid}<line x1="${left}" y1="${zeroY}" x2="${width - right}" y2="${zeroY}" stroke="rgba(255,255,255,0.24)"/>${bars}${xTicks}</svg>${caption ? `<p class="payout-chart-caption">${escapeHtml(caption)}</p>` : ""}`;
+}
+
+function renderPayoutMilestones(analytics) {
+  const container = document.getElementById("payoutMilestones");
+  if (!container) return;
+  const firstPayout = analytics.lifetimePayouts.map((payout) => payout.date).filter(Boolean).sort((a, b) => a.localeCompare(b))[0] || "";
+  container.innerHTML = [
+    {
+      label: "First payout",
+      value: formatDateDisplay(firstPayout),
+      note: firstPayout ? `First qualifying payout landed ${formatDateDisplay(firstPayout)}.` : "No payouts logged for this filter yet.",
+    },
+    {
+      label: "Largest payout",
+      value: analytics.largestPayout ? formatCurrency(getPayoutAbsoluteAmount(analytics.largestPayout)) : "—",
+      note: analytics.largestPayout ? `${accountTargetLabel(analytics.largestPayout.accountId)} on ${formatDateDisplay(analytics.largestPayout.date)}.` : "Expand the range or log payouts to surface the largest record.",
+    },
+    {
+      label: "Total lifetime payouts",
+      value: formatCurrency(analytics.lifetimeTotalAmount),
+      note: `Same target/type/status filters, without the date range.`,
+    },
+    {
+      label: "Current time since last payout",
+      value: analytics.daysSinceLatestPayout === null ? "—" : `${Math.round(analytics.daysSinceLatestPayout)} day${Math.round(analytics.daysSinceLatestPayout) === 1 ? "" : "s"}`,
+      note: analytics.latestLifetimePayout ? `Last payout was ${formatDateDisplay(analytics.latestLifetimePayout.date)}.` : "No payout cadence yet for this scope.",
+    },
+  ].map((card) => `<article class="card payout-card payout-milestone-card"><p class="eyebrow">${escapeHtml(card.label)}</p><div class="value">${escapeHtml(card.value)}</div><p class="muted small">${escapeHtml(card.note)}</p></article>`).join("");
+}
+
+function renderPayoutTimeline(analytics) {
+  const container = document.getElementById("payoutTimeline");
+  if (!container) return;
+  const items = [];
+  if (analytics.selectedPayouts.length) {
+    items.push({
+      title: "Selected range total",
+      value: formatCurrency(analytics.selectedTotalAmount),
+      note: `${analytics.selectedPayouts.length} payout record${analytics.selectedPayouts.length === 1 ? "" : "s"} across ${analytics.rangeLabel}.`,
+    });
+  }
+  if (analytics.averageGapDays !== null) {
+    items.push({
+      title: "Average days between payouts",
+      value: `${analytics.averageGapDays.toFixed(1)} days`,
+      note: `Based on ${analytics.selectedCompletedPayouts.length} completed payout${analytics.selectedCompletedPayouts.length === 1 ? "" : "s"} in the selected range.`,
+    });
+  }
+  if (analytics.daysFromFirstTradeToFirstPayout !== null) {
+    items.push({
+      title: "First trade to first payout",
+      value: `${analytics.daysFromFirstTradeToFirstPayout} days`,
+      note: `From ${formatDateDisplay(analytics.firstTradeDate)} to ${formatDateDisplay(analytics.firstLifetimePayoutDate)}.`,
+    });
+  }
+  if (analytics.payoutRate !== null) {
+    items.push({
+      title: "Payout rate vs gross profits",
+      value: `${analytics.payoutRate.toFixed(1)}%`,
+      note: `${formatCurrency(analytics.selectedPayoutOutflows)} paid out against ${formatCurrency(analytics.selectedGrossTradingProfit)} of gross trading profits.`,
+    });
+  }
+  if (analytics.averageBufferLeft !== null) {
+    items.push({
+      title: "Average buffer left",
+      value: formatCurrency(analytics.averageBufferLeft),
+      note: `Average bufferAfterPayout value across the current payout selection.`,
+    });
+  }
+  if (!items.length) {
+    container.innerHTML = '<p class="payout-timeline-empty">No payout milestones match the current filters yet.</p>';
+    return;
+  }
+  container.innerHTML = items.map((item) => `<article class="payout-timeline-item"><div class="payout-timeline-marker"><span class="payout-timeline-dot"></span></div><div class="payout-timeline-content"><div class="payout-timeline-row"><strong>${escapeHtml(item.title)}</strong><span class="pill payout-pill">${escapeHtml(item.value)}</span></div><p>${escapeHtml(item.note)}</p></div></article>`).join("");
+}
+
+function renderPayoutCharts(analytics) {
+  const cumulativePoints = analytics.selectedPayouts
+    .slice()
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.id || "").localeCompare(String(b.id || "")))
+    .reduce((points, payout) => {
+      const previous = points.at(-1)?.value || 0;
+      points.push({ label: payout.date.slice(5), value: previous + getPayoutAbsoluteAmount(payout) });
+      return points;
+    }, []);
+  if (cumulativePoints.length) {
+    renderLineChart("payoutCumulativeChart", [{ name: "Cumulative payouts", color: "#8d7dff", data: cumulativePoints }], {
+      ariaLabel: "Cumulative payouts over time",
+      caption: analytics.rangeLabel,
+    });
+  } else {
+    renderChartEmptyState("payoutCumulativeChart", "Add payouts in the selected range to build a cumulative view.");
+  }
+
+  const monthlyTotals = [...analytics.selectedPayouts.reduce((map, payout) => {
+    const key = String(payout.date || "").slice(0, 7);
+    if (!key) return map;
+    map.set(key, (map.get(key) || 0) + getPayoutAbsoluteAmount(payout));
+    return map;
+  }, new Map()).entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, value]) => ({
+    label: key.slice(5),
+    payouts: value,
+  }));
+  renderBarChart("payoutMonthlyChart", monthlyTotals, [{ key: "payouts", name: "Payouts", color: "#5fd5ff" }], {
+    ariaLabel: "Monthly payout totals",
+    caption: monthlyTotals.length ? `${monthlyTotals.length} month bucket${monthlyTotals.length === 1 ? "" : "s"} in range.` : "",
+  });
+
+  const weeklyTotals = [...analytics.selectedPayouts.reduce((map, payout) => {
+    const key = getWeeklyBucketStart(payout.date);
+    if (!key) return map;
+    map.set(key, (map.get(key) || 0) + getPayoutAbsoluteAmount(payout));
+    return map;
+  }, new Map()).entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, value]) => ({
+    label: key.slice(5),
+    payouts: value,
+  }));
+  renderBarChart("payoutWeeklyChart", weeklyTotals, [{ key: "payouts", name: "Payouts", color: "#7be0ad" }], {
+    ariaLabel: "Weekly payout totals",
+    caption: weeklyTotals.length ? `${weeklyTotals.length} weekly bucket${weeklyTotals.length === 1 ? "" : "s"} in range.` : "",
+  });
+
+  const comparisonByMonth = new Map();
+  analytics.selectedTradeEntries.forEach((entry) => {
+    const key = String(entry.session.date || "").slice(0, 7);
+    if (!key) return;
+    const current = comparisonByMonth.get(key) || { grossProfit: 0, payouts: 0 };
+    current.grossProfit += Math.max(0, entry.net);
+    comparisonByMonth.set(key, current);
+  });
+  analytics.selectedCompletedPayouts.forEach((payout) => {
+    const key = String(payout.date || "").slice(0, 7);
+    if (!key) return;
+    const current = comparisonByMonth.get(key) || { grossProfit: 0, payouts: 0 };
+    current.payouts += isPayoutRefundLike(payout) ? 0 : getPayoutAbsoluteAmount(payout);
+    comparisonByMonth.set(key, current);
+  });
+  const comparisonCategories = [...comparisonByMonth.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, value]) => ({ label: key.slice(5), ...value }));
+  renderBarChart("payoutComparisonChart", comparisonCategories, [
+    { key: "grossProfit", name: "Gross profit", color: "#d9dde4" },
+    { key: "payouts", name: "Payouts", color: "#8d7dff" },
+  ], {
+    ariaLabel: "Gross profit versus payouts comparison",
+    caption: comparisonCategories.length ? "Positive trade PnL versus completed payout outflows by month." : analytics.selectedTradeEntries.length || analytics.selectedCompletedPayouts.length ? analytics.rangeLabel : "",
+  });
+
+  const sessionNetByDate = new Map();
+  getFilteredSessions({ accountId: uiState.filters.payoutAccountId, from: analytics.selectedFilters.from, to: analytics.selectedFilters.to })
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))
+    .forEach((session) => {
+      if (!session.date) return;
+      sessionNetByDate.set(session.date, (sessionNetByDate.get(session.date) || 0) + getSessionNetForFilter(session, uiState.filters.payoutAccountId));
+    });
+  const payoutDeltaByDate = new Map();
+  analytics.selectedCompletedPayouts.forEach((payout) => {
+    payoutDeltaByDate.set(payout.date, (payoutDeltaByDate.get(payout.date) || 0) + getPayoutSignedBalanceDelta(payout));
+  });
+  const eventDates = [...new Set([...sessionNetByDate.keys(), ...payoutDeltaByDate.keys()])].sort((a, b) => a.localeCompare(b));
+  const balanceData = [];
+  let runningBalance = getStartingBalanceForTarget(uiState.filters.payoutAccountId);
+  if (eventDates.length) {
+    eventDates.forEach((date) => {
+      runningBalance += (sessionNetByDate.get(date) || 0) + (payoutDeltaByDate.get(date) || 0);
+      balanceData.push({ label: date.slice(5), value: runningBalance });
+    });
+  }
+  if (balanceData.length) {
+    renderLineChart("payoutBalanceChart", [{ name: "Balance after payouts", color: "#7be0ad", data: balanceData }], {
+      ariaLabel: "Account balance after payouts over time",
+      caption: `Starting balance ${formatCurrency(getStartingBalanceForTarget(uiState.filters.payoutAccountId))}.`,
+    });
+  } else {
+    renderChartEmptyState("payoutBalanceChart", "Add trades or completed payouts in the selected range to chart balance after payouts.");
+  }
+}
+
 function renderPayoutRows(payouts) {
   return payouts.map((payout) => `
     <tr>
@@ -1888,24 +2300,30 @@ function renderPayouts() {
   const list = document.getElementById("payoutList");
   if (!scorecards || !list) return;
   renderFilterSelects();
-  const payouts = getFilteredPayouts({
-    accountId: uiState.filters.payoutAccountId,
-    from: uiState.filters.payoutFrom,
-    to: uiState.filters.payoutTo,
-    type: uiState.filters.payoutType,
-    status: uiState.filters.payoutStatus,
-  });
-  const total = payouts.reduce((sum, payout) => sum + payout.amount, 0);
-  const completedTotal = payouts.filter((payout) => payout.status === "completed").reduce((sum, payout) => sum + payout.amount, 0);
-  const pendingTotal = payouts.filter((payout) => ["planned", "pending", "processing"].includes(payout.status)).reduce((sum, payout) => sum + payout.amount, 0);
+  const analytics = getPayoutAnalytics();
+  const payouts = analytics.selectedPayouts;
+  const completedTotal = payouts.filter((payout) => payout.status === "completed").reduce((sum, payout) => sum + getPayoutAbsoluteAmount(payout), 0);
+  const pendingTotal = payouts.filter((payout) => ["planned", "pending", "processing"].includes(payout.status)).reduce((sum, payout) => sum + getPayoutAbsoluteAmount(payout), 0);
   const recurringCount = payouts.filter((payout) => payout.isRecurring).length;
   scorecards.innerHTML = [
-    ["Records", String(payouts.length), true],
-    ["Total Amount", formatCurrency(total), true],
+    ["Selected range payouts", formatCurrency(analytics.selectedTotalAmount), analytics.selectedTotalAmount >= 0],
+    ["Lifetime payouts", formatCurrency(analytics.lifetimeTotalAmount), analytics.lifetimeTotalAmount >= 0],
+    ["Number of payouts", String(payouts.length), true],
+    ["Avg / week", analytics.averagePerWeek === null ? "—" : formatCurrency(analytics.averagePerWeek), analytics.averagePerWeek === null || analytics.averagePerWeek >= 0],
+    ["Avg / month", analytics.averagePerMonth === null ? "—" : formatCurrency(analytics.averagePerMonth), analytics.averagePerMonth === null || analytics.averagePerMonth >= 0],
+    ["Largest payout", analytics.largestPayout ? formatCurrency(getPayoutAbsoluteAmount(analytics.largestPayout)) : "—", !analytics.largestPayout || getPayoutAbsoluteAmount(analytics.largestPayout) >= 0],
+    ["Avg days between", analytics.averageGapDays === null ? "—" : `${analytics.averageGapDays.toFixed(1)}d`, analytics.averageGapDays === null || analytics.averageGapDays >= 0],
+    ["Trade → first payout", analytics.daysFromFirstTradeToFirstPayout === null ? "—" : `${analytics.daysFromFirstTradeToFirstPayout}d`, analytics.daysFromFirstTradeToFirstPayout === null || analytics.daysFromFirstTradeToFirstPayout >= 0],
+    ["Payout rate", analytics.payoutRate === null ? "—" : `${analytics.payoutRate.toFixed(1)}%`, analytics.payoutRate === null || analytics.payoutRate <= 100],
+    ["Avg buffer left", analytics.averageBufferLeft === null ? "—" : formatCurrency(analytics.averageBufferLeft), analytics.averageBufferLeft === null || analytics.averageBufferLeft >= 0],
     ["Completed", formatCurrency(completedTotal), true],
-    ["Open Pipeline", formatCurrency(pendingTotal), true],
+    ["Open pipeline", formatCurrency(pendingTotal), true],
     ["Recurring", String(recurringCount), recurringCount > 0],
   ].map(([label, value, good]) => `<div class="card"><div class="muted">${label}</div><div class="value ${good ? "good" : "bad"}">${value}</div></div>`).join("");
+
+  renderPayoutMilestones(analytics);
+  renderPayoutTimeline(analytics);
+  renderPayoutCharts(analytics);
 
   if (!payouts.length) {
     list.innerHTML = '<p class="muted">No payouts match the current filters.</p>';

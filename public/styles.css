@@ -449,6 +449,34 @@ button.danger {
 .payout-filter-controls {
   margin: 0;
 }
+.payouts-analytics-grid {
+  align-items: stretch;
+}
+.payout-chart-card {
+  min-height: 100%;
+}
+.payout-chart-card--wide {
+  grid-column: 1 / -1;
+}
+.payout-chart {
+  min-height: 260px;
+}
+.payout-chart-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  text-align: center;
+}
+.payout-chart-caption {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.payout-timeline-empty {
+  color: var(--muted);
+  margin: 0;
+}
 .payout-milestones .value,
 .payout-timeline-row strong {
   color: #f4f1ff;
@@ -1213,6 +1241,7 @@ button.success:hover {
   .analysis-table-header label { min-width: 100%; }
   .analysis-drilldown-grid { grid-template-columns: 1fr; }
   .payout-form-grid { grid-template-columns: 1fr; }
+  .payout-chart-card--wide { grid-column: auto; }
 }
 
 
