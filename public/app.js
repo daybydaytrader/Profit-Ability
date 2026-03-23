@@ -88,6 +88,23 @@ function normalizeIsoDate(value, fallback = "") {
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : fallback;
 }
 
+function normalizeGroupMembership(period, fallback = {}) {
+  const groupId = String(period?.groupId || fallback.groupId || "").trim();
+  if (!groupId) return null;
+  const joinedAt = normalizeIsoDate(period?.joinedAt, normalizeIsoDate(fallback.joinedAt, todayIso()));
+  const leftAt = normalizeIsoDate(period?.leftAt);
+  if (!joinedAt) return null;
+  if (leftAt && leftAt < joinedAt) return null;
+  return { groupId, joinedAt, leftAt };
+}
+
+function normalizeGroupMemberships(periods = [], fallback = {}) {
+  return (Array.isArray(periods) ? periods : [])
+    .map((period) => normalizeGroupMembership(period, fallback))
+    .filter(Boolean)
+    .sort((a, b) => a.joinedAt.localeCompare(b.joinedAt) || a.groupId.localeCompare(b.groupId) || a.leftAt.localeCompare(b.leftAt));
+}
+
 function normalizePayoutStatus(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return PAYOUT_STATUS_OPTIONS.includes(normalized) ? normalized : "planned";
@@ -287,7 +304,7 @@ function undoLastDeletion() {
     } else {
       state.groups.splice(entry.index, 0, entry.group);
       state.accounts.forEach((account) => {
-        if (entry.memberAccountIds.includes(account.id)) account.groupId = entry.group.id;
+        if (entry.memberAccountIds.includes(account.id)) updateAccountGroup(account, entry.group.id, todayIso());
       });
       state.sessions.forEach((session) => {
         if (entry.affectedSessionIds.includes(session.id)) session.accountId = entry.group.id;
@@ -456,18 +473,35 @@ function normalizeAccount(account) {
   const maxDrawdown = Number(account?.maxDrawdown);
   const createdAt = String(account?.createdAt || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
   const archivedAtRaw = String(account?.archivedAt || "").slice(0, 10);
+  const currentGroupId = String(account?.groupId || "");
   const archivedReason = account?.archivedReason === "passed" ? "passed" : (archivedAtRaw ? "blown" : "");
+  const groupMemberships = normalizeGroupMemberships(account?.groupMemberships, { joinedAt: createdAt });
+  if (archivedAtRaw) {
+    groupMemberships.forEach((period) => {
+      if (!period.leftAt) period.leftAt = archivedAtRaw;
+    });
+  }
+  const legacyGroupJoinedAt = normalizeIsoDate(account?.groupJoinedAt, createdAt);
+  const hasCurrentMembership = currentGroupId && groupMemberships.some((period) => period.groupId === currentGroupId && !period.leftAt);
+  if (currentGroupId && !hasCurrentMembership) {
+    groupMemberships.push(normalizeGroupMembership({
+      groupId: currentGroupId,
+      joinedAt: legacyGroupJoinedAt,
+      leftAt: archivedAtRaw || "",
+    }, { joinedAt: createdAt }));
+  }
   return {
     id: account?.id || `acc${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
     name: name || "Account",
     startingBalance: Number.isFinite(startingBalance) && startingBalance >= 0 ? startingBalance : DEFAULT_STARTING_BALANCE,
     maxDrawdown: Number.isFinite(maxDrawdown) && maxDrawdown >= 0 ? maxDrawdown : 0,
-    groupId: String(account?.groupId || ""),
+    groupId: currentGroupId,
     propFirm: String(account?.propFirm || ""),
     createdAt,
     archivedAt: archivedAtRaw,
     archivedReason,
     groupAccountsAtArchive: Math.max(0, Math.floor(Number(account?.groupAccountsAtArchive) || 0)),
+    groupMemberships: groupMemberships.filter(Boolean),
   };
 }
 
@@ -569,7 +603,7 @@ function passAccount(accountId) {
   const activeMembers = state.accounts.filter((item) => item.groupId === groupId).map(snapshotFromAccount);
   group.memberSnapshots = mergeGroupMemberSnapshots(group.memberSnapshots || [], [...activeMembers, accountSnapshot]);
   state.accounts.forEach((item) => {
-    if (item.groupId === groupId) item.groupId = "";
+    if (item.groupId === groupId) updateAccountGroup(item, "", todayIso());
   });
   archiveGroup(groupId);
 }
@@ -745,6 +779,50 @@ function getGroupById(groupId) {
     || null;
 }
 
+function getAllTrackedAccounts() {
+  return [...state.accounts, ...state.archivedAccounts];
+}
+
+function isMembershipActiveOnDate(period, isoDate) {
+  if (!period?.joinedAt || !isoDate) return false;
+  if (period.joinedAt > isoDate) return false;
+  return !period.leftAt || period.leftAt >= isoDate;
+}
+
+function getGroupMemberCountForDate(groupId, isoDate = todayIso()) {
+  if (!groupId) return 1;
+  const memberIds = new Set();
+  getAllTrackedAccounts().forEach((account) => {
+    if ((account.groupMemberships || []).some((period) => period.groupId === groupId && isMembershipActiveOnDate(period, isoDate))) {
+      memberIds.add(account.id);
+    }
+  });
+  return Math.max(1, memberIds.size);
+}
+
+function updateAccountGroup(account, nextGroupId = "", effectiveDate = todayIso()) {
+  if (!account) return;
+  const previousGroupId = String(account.groupId || "");
+  const normalizedNextGroupId = String(nextGroupId || "");
+  const normalizedDate = normalizeIsoDate(effectiveDate, todayIso());
+  if (previousGroupId === normalizedNextGroupId) return;
+  const memberships = normalizeGroupMemberships(account.groupMemberships, { joinedAt: account.createdAt || normalizedDate });
+
+  if (previousGroupId) {
+    const openMembership = memberships.find((period) => period.groupId === previousGroupId && !period.leftAt);
+    if (openMembership) openMembership.leftAt = normalizedDate;
+  }
+  if (normalizedNextGroupId) {
+    memberships.push(normalizeGroupMembership({
+      groupId: normalizedNextGroupId,
+      joinedAt: normalizedDate,
+      leftAt: "",
+    }, { joinedAt: normalizedDate }));
+  }
+  account.groupId = normalizedNextGroupId;
+  account.groupMemberships = normalizeGroupMemberships(memberships, { joinedAt: normalizedDate });
+}
+
 function getActiveGroupById(groupId) {
   return state.groups.find((group) => group.id === groupId) || null;
 }
@@ -790,7 +868,7 @@ function getTradeMultiplier(trade, session) {
   const targetId = getTradeAccountTargetId(trade, session);
   const group = getGroupById(targetId);
   if (!group) return 1;
-  return getGroupDisplayAccountCount(group.id);
+  return getGroupMemberCountForDate(group.id, session?.date);
 }
 
 function calcTradeNet(trade, session) {
@@ -3752,10 +3830,9 @@ function saveGroupFromBuilder() {
     state.groups.push(group);
   }
   state.accounts.forEach((account) => {
-    if (account.groupId === group.id && !uiState.groupBuilderSelection.includes(account.id)) account.groupId = "";
-  });
-  state.accounts.forEach((account) => {
-    if (uiState.groupBuilderSelection.includes(account.id)) account.groupId = group.id;
+    const shouldBelongToGroup = uiState.groupBuilderSelection.includes(account.id);
+    if (account.groupId === group.id && !shouldBelongToGroup) updateAccountGroup(account, "", todayIso());
+    else if (shouldBelongToGroup && account.groupId !== group.id) updateAccountGroup(account, group.id, todayIso());
   });
   const snapshotMembers = uiState.groupBuilderSelection
     .map((id) => state.accounts.find((account) => account.id === id))
@@ -3809,10 +3886,11 @@ function openAccountEntityModal(type, id) {
     actions.innerHTML = `<button type="button" id="saveEntityAccountBtn">Save</button><button type="button" class="danger" id="removeEntityAccountBtn">Remove</button>`;
     document.getElementById("saveEntityAccountBtn").onclick = () => {
       const previousGroupId = account.groupId;
+      const nextGroupId = document.getElementById("entityAccountGroupSelect").value;
       account.name = document.getElementById("entityAccountNameInput").value.trim() || account.name;
       account.startingBalance = Math.max(0, Number(document.getElementById("entityAccountStartInput").value || account.startingBalance));
       account.maxDrawdown = Math.max(0, Number(document.getElementById("entityAccountMaxDdInput").value || account.maxDrawdown || 0));
-      account.groupId = document.getElementById("entityAccountGroupSelect").value;
+      updateAccountGroup(account, nextGroupId, todayIso());
       if (previousGroupId) {
         const prevGroup = getActiveGroupById(previousGroupId);
         if (prevGroup) prevGroup.memberSnapshots = mergeGroupMemberSnapshots(prevGroup.memberSnapshots || [], [snapshotFromAccount(account)]);
@@ -3976,7 +4054,7 @@ function confirmDeleteEntity() {
       pushDeletionHistory({ type: "group", group: structuredClone(group), index, memberAccountIds, affectedSessionIds, affectedPayoutIds, archived: false });
       state.groups.splice(index, 1);
       state.accounts.forEach((account) => {
-        if (account.groupId === target.id) account.groupId = "";
+        if (account.groupId === target.id) updateAccountGroup(account, "", todayIso());
       });
       state.sessions.forEach((session) => {
         if (session.accountId === target.id) session.accountId = fallback;
