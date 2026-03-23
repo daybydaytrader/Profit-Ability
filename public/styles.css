@@ -1202,6 +1202,81 @@ textarea.session-input {
   height: 260px;
   display: block;
 }
+.equity-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.equity-panel-head h3,
+.equity-panel-head p {
+  margin: 0;
+}
+.equity-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #47505f;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.equity-toggle input {
+  margin: 0;
+}
+.equity-chart-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.equity-chart-meta span {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #3f4856;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.equity-chart-meta strong {
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+}
+.equity-chart-meta em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.equity-payout-events {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.equity-payout-event-card {
+  border: 1px solid #3f4856;
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(48, 53, 66, 0.9), rgba(28, 33, 42, 0.95));
+  display: grid;
+  gap: 6px;
+}
+.equity-payout-event-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.equity-payout-amount {
+  font-weight: 800;
+  font-size: 0.92rem;
+}
 .table-wrap { overflow-x: auto; margin-top: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
