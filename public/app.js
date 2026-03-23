@@ -1042,15 +1042,43 @@ function getPayoutSummaryForTarget(targetId = "all", { from = "", to = "", compl
   });
 }
 
+function getCompletedPayoutOutflowsForTarget(targetId = "all", { from = "", to = "" } = {}) {
+  return state.payouts
+    .filter((payout) => {
+      const payoutTargetId = String(payout.accountId || "");
+      if (targetId === "all") {
+        if (!isActiveTargetId(payoutTargetId)) return false;
+      } else if (payoutTargetId !== targetId) return false;
+      if (from && payout.date < from) return false;
+      if (to && payout.date > to) return false;
+      return isCompletedPayout(payout) && !isPayoutRefundLike(payout);
+    })
+    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || String(a.id || "").localeCompare(String(b.id || "")));
+}
+
 function getTradingPerformanceSummary(targetId = "all", { from = "", to = "" } = {}) {
   const filteredSessions = getFilteredSessions({ accountId: targetId, from, to });
   const startingBalance = getStartingBalanceForTarget(targetId);
   const grossProfitBeforePayouts = filteredSessions.reduce((sum, session) => sum + getSessionNetForFilter(session, targetId), 0);
   const grossTradingEquity = startingBalance + grossProfitBeforePayouts;
   const payoutSummary = getPayoutSummaryForTarget(targetId, { from, to, completedOnly: true });
+  const completedPayoutOutflows = getCompletedPayoutOutflowsForTarget(targetId, { from, to });
+  const payoutDates = completedPayoutOutflows.map((payout) => payout.date).filter(Boolean);
+  const effectiveFrom = from || payoutDates[0] || "";
+  const effectiveTo = to || payoutDates.at(-1) || effectiveFrom;
+  const spanDaysRaw = daysBetweenIso(effectiveFrom, effectiveTo);
+  const spanDays = completedPayoutOutflows.length ? (spanDaysRaw === null ? 1 : Math.max(spanDaysRaw + 1, 1)) : 0;
   const netAccountBalance = grossTradingEquity + payoutSummary.balanceAdjustment;
   const payoutsAsPctOfProfits = grossProfitBeforePayouts > 0 ? (payoutSummary.totalPayouts / grossProfitBeforePayouts) * 100 : null;
   const payoutsAsPctOfBalance = netAccountBalance > 0 ? (payoutSummary.totalPayouts / netAccountBalance) * 100 : null;
+  const largestPayout = completedPayoutOutflows.reduce((largest, payout) => {
+    if (!largest) return payout;
+    const amount = getPayoutAbsoluteAmount(payout);
+    const largestAmount = getPayoutAbsoluteAmount(largest);
+    if (amount !== largestAmount) return amount > largestAmount ? payout : largest;
+    return String(payout.date || "") > String(largest.date || "") ? payout : largest;
+  }, null);
+  const averageMonthlyPayout = spanDays ? payoutSummary.totalPayouts / Math.max(spanDays / 30.4375, 1 / 30.4375) : null;
   return {
     filteredSessions,
     startingBalance,
@@ -1062,6 +1090,9 @@ function getTradingPerformanceSummary(targetId = "all", { from = "", to = "" } =
     payoutBalanceAdjustment: payoutSummary.balanceAdjustment,
     payoutsAsPctOfProfits,
     payoutsAsPctOfBalance,
+    completedPayoutCount: completedPayoutOutflows.length,
+    largestPayout,
+    averageMonthlyPayout,
   };
 }
 
@@ -1393,9 +1424,12 @@ function drawEquity() {
   root.innerHTML = `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Trading equity, balance after payouts, and payout event markers chart"><rect x="0" y="0" width="${w}" height="${h}" fill="transparent"/>${legend}${yGrid}<path d="${toSvgPath(grossRows)}" fill="none" stroke="#d9dde4" stroke-width="2.5"/>${showBalanceAfterPayouts ? `<path d="${toSvgPath(balanceRows)}" fill="none" stroke="#7be0ad" stroke-width="2.5" stroke-dasharray="7 5"/>` : ""}${payoutMarkers}${grossDots}${balanceDots}${xTicks}</svg>`;
 
   if (meta) {
+    const summary = getTradingPerformanceSummary(selectedId, { from, to });
     meta.innerHTML = [
       '<span><strong>Trading Equity</strong><em>Session PnL before withdrawals, refunds, and fees.</em></span>',
       `<span><strong>Balance After Payouts</strong><em>${showBalanceAfterPayouts ? "Visible as the green dashed line with completed payout flow applied." : "Hidden via toggle, but still reflected in payout event cards below."}</em></span>`,
+      `<span><strong>Total Payouts</strong><em>${escapeHtml(formatCurrency(summary.totalPayouts))} across ${summary.completedPayoutCount} completed withdrawal${summary.completedPayoutCount === 1 ? "" : "s"}.</em></span>`,
+      `<span><strong>Payout Snapshot</strong><em>${escapeHtml(summary.largestPayout ? `${formatCurrency(getPayoutAbsoluteAmount(summary.largestPayout))} largest • ${summary.averageMonthlyPayout === null ? "—" : `${formatCurrency(summary.averageMonthlyPayout)}/mo`} • ${summary.payoutsAsPctOfProfits === null ? "—" : `${summary.payoutsAsPctOfProfits.toFixed(1)}% of profits`}` : "No completed payouts in the current range yet.")}</em></span>`,
     ].join("");
   }
 
@@ -1417,9 +1451,9 @@ function renderOverview() {
     ["Gross trading equity", formatCurrency(m.grossTradingEquity), m.grossTradingEquity >= m.startingBalance],
     ["Current balance after payouts", formatCurrency(m.netAccountBalance), m.netAccountBalance >= m.startingBalance],
     ["Total payouts", formatCurrency(m.totalPayouts), m.totalPayouts === 0 || m.totalPayouts <= Math.max(m.grossTradingEquity, 0)],
-    ["Deposits / refunds", formatCurrency(m.totalRefunds), m.totalRefunds >= 0],
+    ["Largest payout", m.largestPayout ? formatCurrency(getPayoutAbsoluteAmount(m.largestPayout)) : "—", !m.largestPayout || getPayoutAbsoluteAmount(m.largestPayout) >= 0],
+    ["Avg monthly payout", m.averageMonthlyPayout === null ? "—" : formatCurrency(m.averageMonthlyPayout), m.averageMonthlyPayout === null || m.averageMonthlyPayout >= 0],
     ["Payouts vs profits", m.payoutsAsPctOfProfits === null ? "—" : `${m.payoutsAsPctOfProfits.toFixed(1)}%`, m.payoutsAsPctOfProfits === null || m.payoutsAsPctOfProfits <= 100],
-    ["Payouts vs balance", m.payoutsAsPctOfBalance === null ? "—" : `${m.payoutsAsPctOfBalance.toFixed(1)}%`, m.payoutsAsPctOfBalance === null || m.payoutsAsPctOfBalance <= 100],
     ["Sessions", `${m.sessions}`, true],
     ["Trades", `${m.trades}`, true],
     ["Win Rate", `${m.winRate.toFixed(1)}%`, m.winRate >= 50],
@@ -1603,7 +1637,7 @@ function renderAccounts() {
         ? state.accounts
             .map((account) => {
               const summary = getTradingPerformanceSummary(account.id);
-              return `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="success" data-pass-account="${account.id}">Pass</button> <button type="button" class="danger" data-blowup-account="${account.id}">Blow Up</button> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Firm: ${escapeHtml(account.propFirm || "—")}</p><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p><p class="muted small">Gross trading equity: ${formatCurrency(summary.grossTradingEquity)} · Balance after payouts: ${formatCurrency(summary.netAccountBalance)}</p><p class="muted small">Gross profit: ${formatCurrency(summary.grossProfitBeforePayouts)} · Payouts: ${formatCurrency(summary.totalPayouts)}</p></article>`;
+              return `<article class="playbook-card" data-open-account="${account.id}"><div class="playbook-card-head"><h4>${escapeHtml(account.name)}</h4><div><span class="pill">$${formatWithThousands(account.startingBalance, 0)}</span> <button type="button" class="success" data-pass-account="${account.id}">Pass</button> <button type="button" class="danger" data-blowup-account="${account.id}">Blow Up</button> <button type="button" class="danger" data-remove-account="${account.id}">Remove</button></div></div><p class="muted small">Firm: ${escapeHtml(account.propFirm || "—")}</p><p class="muted small">Max DD: $${formatWithThousands(account.maxDrawdown || 0, 0)}</p><p class="muted small">Group: ${escapeHtml(account.groupId ? accountTargetLabel(account.groupId) : "—")}</p><p class="muted small">Gross trading equity: ${formatCurrency(summary.grossTradingEquity)} · Balance after payouts: ${formatCurrency(summary.netAccountBalance)}</p><p class="muted small">Gross profit: ${formatCurrency(summary.grossProfitBeforePayouts)} · Payouts: ${formatCurrency(summary.totalPayouts)}</p><p class="muted small">Largest payout: ${summary.largestPayout ? formatCurrency(getPayoutAbsoluteAmount(summary.largestPayout)) : "—"} · Avg monthly payout: ${summary.averageMonthlyPayout === null ? "—" : formatCurrency(summary.averageMonthlyPayout)} · Payout rate: ${summary.payoutsAsPctOfProfits === null ? "—" : `${summary.payoutsAsPctOfProfits.toFixed(1)}%`}</p></article>`;
             })
             .join("")
         : '<div class="muted small">No active accounts yet.</div>';
@@ -1620,7 +1654,7 @@ function renderAccounts() {
           ? state.groups
               .map((group) => {
                 const summary = getTradingPerformanceSummary(group.id);
-                return `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-blowup-group="${group.id}">Blow Up</button> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Gross trading equity: ${formatCurrency(summary.grossTradingEquity)} · Balance after payouts: ${formatCurrency(summary.netAccountBalance)}</p><p class="muted small">Gross profit: ${formatCurrency(summary.grossProfitBeforePayouts)} · Payouts: ${formatCurrency(summary.totalPayouts)}</p></article>`;
+                return `<article class="playbook-card" data-open-group="${group.id}"><div class="playbook-card-head"><h4>${escapeHtml(group.name)}</h4><div><span class="pill">${getGroupDisplayAccountCount(group.id)} acc</span> <button type="button" class="danger" data-blowup-group="${group.id}">Blow Up</button> <button type="button" class="danger" data-remove-group="${group.id}">Remove</button></div></div><p class="muted small">Gross trading equity: ${formatCurrency(summary.grossTradingEquity)} · Balance after payouts: ${formatCurrency(summary.netAccountBalance)}</p><p class="muted small">Gross profit: ${formatCurrency(summary.grossProfitBeforePayouts)} · Payouts: ${formatCurrency(summary.totalPayouts)}</p><p class="muted small">Largest payout: ${summary.largestPayout ? formatCurrency(getPayoutAbsoluteAmount(summary.largestPayout)) : "—"} · Avg monthly payout: ${summary.averageMonthlyPayout === null ? "—" : formatCurrency(summary.averageMonthlyPayout)} · Payout rate: ${summary.payoutsAsPctOfProfits === null ? "—" : `${summary.payoutsAsPctOfProfits.toFixed(1)}%`}</p></article>`;
               })
               .join("")
           : '<div class="muted small">No current groups yet.</div>');
