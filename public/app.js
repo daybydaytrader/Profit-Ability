@@ -25,6 +25,21 @@ const PAYOUT_TYPE_OPTIONS = ["profit withdrawal", "refund", "fee", "tax reserve"
 const PAYOUT_STATUS_OPTIONS = ["planned", "pending", "processing", "completed", "canceled"];
 const PAYOUT_DESTINATION_OPTIONS = ["Wallet", "Wise"];
 
+function getDefaultPayoutTargetId() {
+  return state?.accounts?.[0]?.id || state?.groups?.[0]?.id || state?.archivedAccounts?.[0]?.id || state?.archivedGroups?.[0]?.id || "";
+}
+
+function createPayoutDraft() {
+  return {
+    accountId: getDefaultPayoutTargetId(),
+    date: todayIso(),
+    amount: "",
+    type: PAYOUT_TYPE_OPTIONS[0],
+    destination: "",
+    note: "",
+  };
+}
+
 const seed = {
   accounts: [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: DEFAULT_STARTING_BALANCE, createdAt: new Date().toISOString().slice(0, 10), propFirm: "" }],
   archivedAccounts: [],
@@ -170,6 +185,7 @@ const uiState = {
   groupPickerSelectedId: "",
   groupBuilderSelection: [],
   editingGroupId: null,
+  payoutDraft: createPayoutDraft(),
   filters: {
     overviewAccountId: "all",
     overviewFrom: "",
@@ -1543,6 +1559,12 @@ function targetOptionsWithLegacy(selected = "") {
   return `${options}<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)} (legacy)</option>`;
 }
 
+function syncPayoutDraftTarget() {
+  const nextTargetId = uiState.payoutDraft.accountId;
+  if (nextTargetId && (getAccountById(nextTargetId) || getGroupById(nextTargetId) || state.archivedAccounts.some((account) => account.id === nextTargetId) || state.archivedGroups.some((group) => group.id === nextTargetId))) return;
+  uiState.payoutDraft.accountId = getDefaultPayoutTargetId();
+}
+
 function payoutTypeOptions(selected = "all", includeAll = false) {
   const options = PAYOUT_TYPE_OPTIONS.map((type) => `<option value="${escapeHtml(type)}" ${selected === type ? "selected" : ""}>${escapeHtml(type)}</option>`);
   return `${includeAll ? `<option value="all" ${selected === "all" ? "selected" : ""}>All types</option>` : ""}${options.join("")}`;
@@ -2655,7 +2677,24 @@ function renderPayoutRows(payouts) {
   `).join("");
 }
 
+function renderPayoutDraft() {
+  syncPayoutDraftTarget();
+  const accountInput = document.getElementById("payoutDraftAccountId");
+  const dateInput = document.getElementById("payoutDraftDate");
+  const amountInput = document.getElementById("payoutDraftAmount");
+  const typeInput = document.getElementById("payoutDraftType");
+  const destinationInput = document.getElementById("payoutDraftDestination");
+  const noteInput = document.getElementById("payoutDraftNote");
+  if (accountInput) accountInput.innerHTML = targetOptionsWithLegacy(uiState.payoutDraft.accountId);
+  if (dateInput && document.activeElement !== dateInput) dateInput.value = uiState.payoutDraft.date;
+  if (amountInput && document.activeElement !== amountInput) amountInput.value = uiState.payoutDraft.amount;
+  if (typeInput) typeInput.innerHTML = payoutTypeOptions(uiState.payoutDraft.type);
+  if (destinationInput) destinationInput.innerHTML = payoutDestinationOptions(uiState.payoutDraft.destination);
+  if (noteInput && document.activeElement !== noteInput) noteInput.value = uiState.payoutDraft.note;
+}
+
 function renderPayouts() {
+  renderPayoutDraft();
   const scorecards = document.getElementById("payoutScorecards");
   const reviewSummary = document.getElementById("payoutReviewSummary");
   const metadataBreakdowns = document.getElementById("payoutMetadataBreakdowns");
@@ -3460,7 +3499,7 @@ function rerender() {
 function createPayoutWithDefaults(date = todayIso()) {
   return normalizePayout({
     id: `po${Date.now()}`,
-    accountId: state.accounts[0]?.id || state.groups[0]?.id || "",
+    accountId: getDefaultPayoutTargetId(),
     date,
     amount: 0,
     type: PAYOUT_TYPE_OPTIONS[0],
@@ -3495,6 +3534,26 @@ function createSessionWithDefaults(date = todayIso()) {
 function addSession(date = todayIso()) {
   state.sessions.unshift(createSessionWithDefaults(date));
   state.sessions.sort(compareSessionDatesDesc);
+  rerender();
+}
+
+function resetPayoutDraft() {
+  uiState.payoutDraft = createPayoutDraft();
+}
+
+function addPayoutFromDraft() {
+  syncPayoutDraftTarget();
+  state.payouts.unshift(normalizePayout({
+    id: `po${Date.now()}`,
+    accountId: uiState.payoutDraft.accountId,
+    date: normalizeIsoDate(uiState.payoutDraft.date, todayIso()),
+    amount: toNum(uiState.payoutDraft.amount),
+    type: normalizePayoutType(uiState.payoutDraft.type),
+    destination: normalizePayoutDestination(uiState.payoutDraft.destination),
+    note: String(uiState.payoutDraft.note || "").trim(),
+    status: "planned",
+  }));
+  resetPayoutDraft();
   rerender();
 }
 
@@ -4236,7 +4295,7 @@ document.getElementById("navTabs").addEventListener("click", (e) => {
 });
 
 document.getElementById("addSessionBtn").addEventListener("click", addSession);
-document.getElementById("addPayoutBtn")?.addEventListener("click", () => addPayout());
+document.getElementById("addPayoutBtn")?.addEventListener("click", addPayoutFromDraft);
 document.getElementById("daySessionsModalAddBtn")?.addEventListener("click", () => {
   if (!uiState.daySessionsModalDate) return;
   addSession(uiState.daySessionsModalDate);
@@ -5032,3 +5091,30 @@ document.addEventListener("keydown", (e) => {
 togglePlaybookRemoveButton();
 
 rerender();
+
+["accountId", "date", "amount", "type", "destination", "note"].forEach((key) => {
+  const input = document.getElementById(`payoutDraft${key.charAt(0).toUpperCase()}${key.slice(1)}`);
+  input?.addEventListener("input", (event) => {
+    const value = event.target.value;
+    uiState.payoutDraft[key] = key === "destination"
+      ? normalizePayoutDestination(value)
+      : key === "type"
+        ? normalizePayoutType(value)
+        : key === "date"
+          ? normalizeIsoDate(value, todayIso())
+          : value;
+  });
+  input?.addEventListener("change", (event) => {
+    const value = event.target.value;
+    uiState.payoutDraft[key] = key === "accountId"
+      ? value
+      : key === "destination"
+        ? normalizePayoutDestination(value)
+        : key === "type"
+          ? normalizePayoutType(value)
+          : key === "date"
+            ? normalizeIsoDate(value, todayIso())
+            : value;
+    if (key === "accountId") renderPayoutDraft();
+  });
+});
