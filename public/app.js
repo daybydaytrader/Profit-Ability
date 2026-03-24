@@ -4658,7 +4658,7 @@ document.addEventListener("input", (e) => {
   if (t.dataset.sessionK || t.dataset.sessionRule) {
     updateSessionField(t);
     if (t.dataset.sessionK === "date") {
-      syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: false });
+      syncSessionViewsFromState(container, { includeMistakes: true, rerenderSource: true });
       return;
     }
     if (t.tagName === "TEXTAREA") updateAllCounters();
