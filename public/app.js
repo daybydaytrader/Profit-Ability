@@ -3682,6 +3682,37 @@ function addTradeToSession(sessionId) {
   rerender();
 }
 
+function duplicateSession(sessionId) {
+  const sourceIndex = state.sessions.findIndex((session) => session.id === sessionId);
+  if (sourceIndex < 0) return;
+  const sourceSession = state.sessions[sourceIndex];
+  if (!sourceSession) return;
+  const cloned = structuredClone(sourceSession);
+  cloned.id = `s${Date.now()}${Math.random().toString(16).slice(2, 6)}`;
+  cloned.trades = (Array.isArray(cloned.trades) ? cloned.trades : []).map((trade) => ({
+    ...trade,
+    id: `t${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
+  }));
+  const normalized = normalizeSession(cloned);
+  state.sessions.splice(sourceIndex + 1, 0, normalized);
+  rerender();
+}
+
+function duplicateTrade(sessionId, tradeId) {
+  const session = state.sessions.find((entry) => entry.id === sessionId);
+  if (!session) return;
+  const sourceIndex = session.trades.findIndex((trade) => trade.id === tradeId);
+  if (sourceIndex < 0) return;
+  const sourceTrade = session.trades[sourceIndex];
+  if (!sourceTrade) return;
+  const clonedTrade = normalizeTrade({
+    ...structuredClone(sourceTrade),
+    id: `t${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
+  });
+  session.trades.splice(sourceIndex + 1, 0, clonedTrade);
+  rerender();
+}
+
 function addRule() {
   const name = document.getElementById("ruleModalNameInput").value.trim();
   const type = document.getElementById("ruleModalTypeInput").value;
@@ -4805,6 +4836,12 @@ document.addEventListener("click", (e) => {
     return;
   }
 
+  const dupSessionId = e.target.dataset.dupSession;
+  if (dupSessionId) {
+    duplicateSession(dupSessionId);
+    return;
+  }
+
   const toggleSessionId = e.target.dataset.toggleSession;
   if (toggleSessionId) {
     const session = state.sessions.find((s) => s.id === toggleSessionId);
@@ -4855,6 +4892,13 @@ document.addEventListener("click", (e) => {
   if (tradeId) {
     const parentSessionId = e.target.dataset.sessionId;
     openDeleteEntityModal("trade", { sessionId: parentSessionId, tradeId });
+    return;
+  }
+
+  const duplicateTradeId = e.target.dataset.dupTrade;
+  if (duplicateTradeId) {
+    const parentSessionId = e.target.dataset.sessionId;
+    duplicateTrade(parentSessionId, duplicateTradeId);
   }
 });
 
