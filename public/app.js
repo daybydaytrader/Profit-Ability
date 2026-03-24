@@ -1843,7 +1843,10 @@ function renderSessionTrades(session) {
         <td data-trade-duration="${t.id}">${calcTradeDuration(t)}</td>
         <td data-trade-r="${t.id}">${r.toFixed(1)}</td>
         <td data-trade-pnl="${t.id}" class="${totalPnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">${escapeHtml(accountTargetLabel(tradeTargetId))}: $${totalPnl.toFixed(2)}</div>` : ""}</td>
-        <td><button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button></td>
+        <td>
+          <button data-dup-trade="${t.id}" data-session-id="${session.id}">Duplicate</button>
+          <button data-del-trade="${t.id}" data-session-id="${session.id}">Delete</button>
+        </td>
       </tr>`;
     })
     .join("");
@@ -1923,6 +1926,7 @@ function renderSessionCards(sessions, emptyMessage = "No sessions yet.") {
             <span class="char-counter">0/${SESSION_TEXT_MAX}</span>
           </label>
           <div class="session-top-actions">
+            <button data-dup-session="${s.id}">Duplicate Session</button>
             <button class="danger session-delete-btn" data-del-session="${s.id}">Delete Session</button>
             <input type="file" accept="image/*" hidden data-session-shot-input="${s.id}" />
           </div>
