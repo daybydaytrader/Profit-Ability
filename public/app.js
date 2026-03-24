@@ -1888,7 +1888,7 @@ function renderSessionCards(sessions, emptyMessage = "No sessions yet.") {
           <button class="collapse-arrow" title="Toggle session" data-toggle-session="${s.id}" aria-label="Toggle session">${s.collapsed ? "▶" : "▼"}</button>
           <div class="session-date-fields">
             <label>Date
-              <input class="date-input" type="date" data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
+              <input class="date-input" type="date" required data-session-k="date" data-session-id="${s.id}" value="${s.date || ""}"/>
             </label>
             <label>Day
               <input class="day-input" type="number" min="1" step="1" inputmode="numeric" data-session-k="day" data-session-id="${s.id}" value="${s.day || ""}" placeholder="e.g. 12"/>
@@ -4261,7 +4261,13 @@ function updateSessionField(target) {
     const key = target.dataset.sessionK;
     if (["mistakes", "correctDecisions"].includes(key)) session[key] = String(target.value).slice(0, SESSION_TEXT_MAX);
     else if (key === "day") session.day = String(target.value || "").replace(/\D/g, "").slice(0, 3);
-    else session[key] = target.value;
+    else if (key === "date") {
+      const previousDate = normalizeIsoDate(session.date, todayIso());
+      // Keep the existing date if a date input is cleared so sessions never become undated.
+      // If prior data was invalid, fall back to today's ISO date.
+      session.date = normalizeIsoDate(target.value, previousDate);
+      target.value = session.date;
+    } else session[key] = target.value;
   }
 
   if (target.dataset.sessionRule) {
