@@ -45,6 +45,7 @@ const seed = {
   archivedAccounts: [],
   groups: [],
   archivedGroups: [],
+  walletBalance: 0,
   payouts: [],
   playbook: [{ id: "pb1", title: "ORB", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }, { id: "pb2", title: "Pullback", confluences: "", perfectSetup: "", perfectSetupEdits: { lines: [], texts: [], history: [], future: [] } }],
   rules: [
@@ -139,6 +140,12 @@ function normalizePayout(payout) {
     referenceId: String(payout?.referenceId || "").trim(),
     note: String(payout?.note || "").trim(),
   };
+}
+
+function normalizeWalletBalance(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, parsed);
 }
 
 function getAllSymbolOptions() {
@@ -749,6 +756,7 @@ function loadState() {
     archivedAccounts,
     groups,
     archivedGroups,
+    walletBalance: normalizeWalletBalance(parsed.walletBalance),
     payouts,
     playbook: playbook.length ? playbook : structuredClone(seed.playbook),
     rules,
@@ -2091,6 +2099,18 @@ function getPayoutSignedBalanceDelta(payout) {
   return isPayoutRefundLike(payout) ? amount : -amount;
 }
 
+function getWalletBalanceFromPayouts() {
+  return state.payouts.reduce((sum, payout) => {
+    if (!isCompletedPayout(payout)) return sum;
+    if (payout.destination !== "Wallet") return sum;
+    return sum + getPayoutAbsoluteAmount(payout);
+  }, 0);
+}
+
+function getWalletBalance() {
+  return Math.max(0, normalizeWalletBalance(state.walletBalance) + getWalletBalanceFromPayouts());
+}
+
 function average(values) {
   if (!values.length) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -2345,7 +2365,7 @@ function getPayoutAnalytics() {
     latestLifetimePayout,
     daysSinceLatestPayout,
     rangeLabel: getPayoutChartRangeLabel(selectedFilters, selectedPayouts),
-    byReason: summarizePayoutBreakdown(selectedPayouts, (payout) => payout.reason),
+    byReason: summarizePayoutBreakdown(selectedPayouts, (payout) => payout.note || payout.reason),
     byDestination: summarizePayoutBreakdown(selectedPayouts, (payout) => payout.destination),
     byAccountGroup: summarizePayoutBreakdown(selectedPayouts, (payout) => accountTargetLabel(payout.accountId), { emptyLabel: "Unknown target" }),
     byRecurrence: summarizePayoutBreakdown(selectedPayouts, (payout) => (payout.isRecurring ? "Recurring" : "Non-recurring")),
@@ -2595,9 +2615,9 @@ function renderPayoutMetadataBreakdowns(analytics) {
   container.innerHTML = [
     renderBreakdownPanel({
       title: "Payouts by reason",
-      note: "Uses each payout record’s stored reason field.",
+      note: "Uses each payout record’s note field (fallback: legacy reason).",
       rows: analytics.byReason.map((row) => ({ ...row, value: row.totalAmount })),
-      emptyMessage: "Add payout reasons to break down withdrawal intent.",
+      emptyMessage: "Add notes to break down payout intent.",
       metaFormatter: (row) => `${row.records} record${row.records === 1 ? "" : "s"} · ${row.completedRecords} completed`,
     }),
     renderBreakdownPanel({
@@ -2761,12 +2781,18 @@ function renderPayoutDraft() {
   const typeInput = document.getElementById("payoutDraftType");
   const destinationInput = document.getElementById("payoutDraftDestination");
   const noteInput = document.getElementById("payoutDraftNote");
+  const walletHint = document.getElementById("payoutDraftWalletHint");
   if (accountInput) accountInput.innerHTML = targetOptionsWithLegacy(uiState.payoutDraft.accountId);
   if (dateInput && document.activeElement !== dateInput) dateInput.value = uiState.payoutDraft.date;
   if (amountInput && document.activeElement !== amountInput) amountInput.value = uiState.payoutDraft.amount;
   if (typeInput) typeInput.innerHTML = payoutTypeOptions(uiState.payoutDraft.type);
   if (destinationInput) destinationInput.innerHTML = payoutDestinationOptions(uiState.payoutDraft.destination);
   if (noteInput && document.activeElement !== noteInput) noteInput.value = uiState.payoutDraft.note;
+  if (walletHint) {
+    walletHint.textContent = uiState.payoutDraft.destination === "Wallet"
+      ? `Wallet balance after this payout (if completed): ${formatCurrency(getWalletBalance() + getPayoutAbsoluteAmount(uiState.payoutDraft))}`
+      : `Current wallet balance: ${formatCurrency(getWalletBalance())}`;
+  }
 }
 
 function renderPayouts() {
@@ -2783,6 +2809,7 @@ function renderPayouts() {
   const pendingTotal = payouts.filter((payout) => ["planned", "pending", "processing"].includes(payout.status)).reduce((sum, payout) => sum + getPayoutAbsoluteAmount(payout), 0);
   const recurringCount = payouts.filter((payout) => payout.isRecurring).length;
   scorecards.innerHTML = [
+    ["Wallet balance", formatCurrency(getWalletBalance()), getWalletBalance() >= 0],
     ["Selected range payouts", formatCurrency(analytics.selectedTotalAmount), analytics.selectedTotalAmount >= 0],
     ["Lifetime payouts", formatCurrency(analytics.lifetimeTotalAmount), analytics.lifetimeTotalAmount >= 0],
     ["Number of payouts", String(payouts.length), true],
@@ -3689,6 +3716,10 @@ function openAccountModal() {
   uiState.groupPickerSelectedId = "";
   document.getElementById("accountModalNameInput").value = "";
   document.getElementById("accountModalBalanceInput").value = "";
+  document.getElementById("accountModalFundingSourceInput").value = "bank";
+  document.getElementById("accountModalWalletAmountInput").value = "";
+  document.getElementById("accountModalWalletAmountWrap").hidden = true;
+  document.getElementById("accountModalWalletBalanceHint").textContent = `Current wallet balance: ${formatCurrency(getWalletBalance())}`;
   document.getElementById("accountModalDrawdownInput").value = "";
   document.getElementById("accountModalFirmInput").value = "";
   document.getElementById("accountModalTptSizeInput").value = "";
@@ -3708,6 +3739,8 @@ function saveAccountFromModal() {
   const propFirm = document.getElementById("accountModalFirmInput").value;
   const tptSize = Number(document.getElementById("accountModalTptSizeInput").value || 0);
   let startingBalance = Number(document.getElementById("accountModalBalanceInput").value || DEFAULT_STARTING_BALANCE);
+  const fundingSource = document.getElementById("accountModalFundingSourceInput").value === "wallet" ? "wallet" : "bank";
+  const walletContribution = Math.max(0, toNum(document.getElementById("accountModalWalletAmountInput").value));
   let maxDrawdown = Number(document.getElementById("accountModalDrawdownInput").value || 0);
   const selectedTpt = TPT_ACCOUNT_OPTIONS.find((item) => item.equity === tptSize);
   if (propFirm === "TPT" && selectedTpt) {
@@ -3715,6 +3748,17 @@ function saveAccountFromModal() {
     maxDrawdown = selectedTpt.maxDrawdown;
   }
   if (!name || !Number.isFinite(startingBalance) || startingBalance < 0 || !Number.isFinite(maxDrawdown) || maxDrawdown < 0) return;
+  if (fundingSource === "wallet") {
+    if (!walletContribution) {
+      alert("Enter a wallet contribution amount.");
+      return;
+    }
+    if (walletContribution > getWalletBalance()) {
+      alert("Wallet contribution cannot exceed current wallet balance.");
+      return;
+    }
+    state.walletBalance = normalizeWalletBalance(state.walletBalance) - walletContribution;
+  }
 
   const newAccount = normalizeAccount({ id: `acc${Date.now()}`, name, startingBalance, maxDrawdown, groupId: uiState.pendingAccountGroupId || "", propFirm, createdAt: todayIso() });
   state.accounts.push(newAccount);
@@ -4208,6 +4252,7 @@ function importBackupFile(file) {
       state.accounts = (Array.isArray(migrated.accounts) ? migrated.accounts : [{ id: DEFAULT_ACCOUNT_ID, name: "Main Account", startingBalance: Number.isFinite(legacyStart) && legacyStart >= 0 ? legacyStart : DEFAULT_STARTING_BALANCE }]).map(normalizeAccount);
       state.groups = (Array.isArray(migrated.groups) ? migrated.groups : []).map(normalizeGroup);
       state.archivedGroups = (Array.isArray(migrated.archivedGroups) ? migrated.archivedGroups : []).map(normalizeGroup);
+      state.walletBalance = normalizeWalletBalance(migrated.walletBalance);
       state.payouts = (Array.isArray(migrated.payouts) ? migrated.payouts : []).map(normalizePayout);
       state.playbook = normalizePlaybook(migrated.playbook?.length ? migrated.playbook : []);
       if (!state.playbook.length) state.playbook = structuredClone(seed.playbook);
@@ -4226,6 +4271,7 @@ function resetToDemo() {
   state.accounts = structuredClone(seed.accounts);
   state.groups = structuredClone(seed.groups);
   state.archivedGroups = structuredClone(seed.archivedGroups || []);
+  state.walletBalance = normalizeWalletBalance(seed.walletBalance);
   state.payouts = structuredClone(seed.payouts || []);
   state.playbook = structuredClone(seed.playbook);
   state.rules = structuredClone(seed.rules);
@@ -4485,6 +4531,13 @@ document.getElementById("saveAccountBtn").addEventListener("click", saveAccountF
 document.getElementById("accountModalFirmInput").addEventListener("change", (e) => {
   const wrap = document.getElementById("accountModalTptWrap");
   if (wrap) wrap.hidden = e.target.value !== "TPT";
+});
+document.getElementById("accountModalFundingSourceInput").addEventListener("change", (e) => {
+  const walletWrap = document.getElementById("accountModalWalletAmountWrap");
+  const walletHint = document.getElementById("accountModalWalletBalanceHint");
+  const isWallet = e.target.value === "wallet";
+  if (walletWrap) walletWrap.hidden = !isWallet;
+  if (walletHint) walletHint.textContent = `Current wallet balance: ${formatCurrency(getWalletBalance())}`;
 });
 document.getElementById("accountModalTptSizeInput").addEventListener("change", (e) => {
   const selected = TPT_ACCOUNT_OPTIONS.find((item) => item.equity === Number(e.target.value || 0));

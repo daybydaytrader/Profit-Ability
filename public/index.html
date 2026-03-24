@@ -176,6 +176,7 @@
                     <input id="payoutDraftNote" type="text" placeholder="Weekly consistency withdrawal" />
                   </label>
                 </div>
+                <p id="payoutDraftWalletHint" class="muted small"></p>
                 <div class="payout-form-actions">
                   <button id="addPayoutBtn" type="button">+ Add Payout</button>
                   <button type="button" class="payout-secondary-btn">Save Draft</button>
@@ -603,6 +604,16 @@
         </label>
         <label>Starting equity
           <input id="accountModalBalanceInput" type="number" min="0" step="100" placeholder="50000" />
+        </label>
+        <label>Funding source
+          <select id="accountModalFundingSourceInput">
+            <option value="bank">Bank account</option>
+            <option value="wallet">Wallet</option>
+          </select>
+        </label>
+        <label id="accountModalWalletAmountWrap" hidden>Wallet contribution
+          <input id="accountModalWalletAmountInput" type="number" min="0" step="0.01" placeholder="500" />
+          <span id="accountModalWalletBalanceHint" class="muted small"></span>
         </label>
         <label>Max drawdown
           <input id="accountModalDrawdownInput" type="number" min="0" step="100" placeholder="2500" />
