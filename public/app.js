@@ -358,6 +358,12 @@ function toNum(v) {
   return Number(cleaned || 0);
 }
 
+function toInputNumericValue(value) {
+  if (value == null) return "";
+  if (typeof value === "string" && value.trim() === "") return "";
+  return String(toNum(value));
+}
+
 function normalizeTradeTime(value) {
   const raw = String(value || "").trim();
   const match = raw.match(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -1820,12 +1826,12 @@ function renderSessionTrades(session) {
           </select>
         </td>
         <td><select data-trade-k="type" data-session-id="${session.id}" data-trade-id="${t.id}"><option value="long" ${t.type === "long" ? "selected" : ""}>long</option><option value="short" ${t.type === "short" ? "selected" : ""}>short</option></select></td>
-        <td><input data-trade-k="size" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="1" value="${t.size ?? 0}"/></td>
+        <td><input data-trade-k="size" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="1" value="${toInputNumericValue(t.size)}"/></td>
         <td><input data-trade-k="entry" data-session-id="${session.id}" data-trade-id="${t.id}" value="${formatTradePrice(t.entry, t.symbol)}"/></td>
         <td><input data-trade-k="entryTime" data-session-id="${session.id}" data-trade-id="${t.id}" type="time" value="${normalizeTradeTime(t.entryTime)}"/></td>
         <td><input data-trade-k="exit" data-session-id="${session.id}" data-trade-id="${t.id}" value="${formatTradePrice(t.exit, t.symbol)}"/></td>
         <td><input data-trade-k="exitTime" data-session-id="${session.id}" data-trade-id="${t.id}" type="time" value="${normalizeTradeTime(t.exitTime)}"/></td>
-        <td><input data-trade-k="stop" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${toNum(t.stop)}"/></td>
+        <td><input data-trade-k="stop" data-session-id="${session.id}" data-trade-id="${t.id}" type="number" step="0.01" value="${toInputNumericValue(t.stop)}"/></td>
         <td data-trade-duration="${t.id}">${calcTradeDuration(t)}</td>
         <td data-trade-r="${t.id}">${r.toFixed(1)}</td>
         <td data-trade-pnl="${t.id}" class="${totalPnl >= 0 ? "good" : "bad"}">$${pnl.toFixed(2)}${multiplier > 1 ? `<div class="muted small">${escapeHtml(accountTargetLabel(tradeTargetId))}: $${totalPnl.toFixed(2)}</div>` : ""}</td>
@@ -2737,7 +2743,7 @@ function renderPayoutRows(payouts) {
     <tr>
       <td><input type="date" data-payout-k="date" data-payout-id="${payout.id}" value="${escapeHtml(payout.date || "")}" /></td>
       <td><select data-payout-k="accountId" data-payout-id="${payout.id}">${targetOptionsWithLegacy(payout.accountId)}</select></td>
-      <td><input type="number" step="0.01" data-payout-k="amount" data-payout-id="${payout.id}" value="${Number(payout.amount || 0)}" /></td>
+      <td><input type="number" step="0.01" data-payout-k="amount" data-payout-id="${payout.id}" value="${toInputNumericValue(payout.amount)}" /></td>
       <td><select data-payout-k="type" data-payout-id="${payout.id}">${payoutTypeOptions(payout.type)}</select></td>
       <td><select data-payout-k="destination" data-payout-id="${payout.id}">${payoutDestinationOptions(payout.destination)}</select></td>
       <td><select data-payout-k="status" data-payout-id="${payout.id}">${payoutStatusOptions(payout.status)}</select></td>
