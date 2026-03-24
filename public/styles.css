@@ -894,8 +894,8 @@ button.danger {
 
 
 .session-shot {
-  width: 88px;
-  height: 88px;
+  width: 110px;
+  height: 110px;
   border-radius: 10px;
   border: 1px solid #4a5261;
   background: linear-gradient(180deg, #2f353f, #242931);
@@ -930,8 +930,8 @@ button.danger {
   text-align: center;
 }
 .session-shot-empty {
-  width: 88px;
-  height: 88px;
+  width: 110px;
+  height: 110px;
   border-radius: 10px;
   border: 1px dashed #596173;
   display: flex;
